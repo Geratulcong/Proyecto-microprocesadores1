@@ -12,7 +12,7 @@ async def main():
         print(d)
 
     # Reemplaza con el address de tu Arduino (ejemplo: 'F4:12:FA:AA:BB:CC')
-    address = "TU:AD:DR:ES:S"
+    address = "FA:04:1B:E0:65:B1"
     async with BleakClient(address) as client:
         print("Conectado:", client.is_connected)
         # Aquí puedes leer/escribir características BLE
