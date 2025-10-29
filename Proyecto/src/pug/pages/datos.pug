@@ -1,0 +1,85 @@
+extends ../layouts/dashboard.pug
+
+block config
+    - var bodyClass = 'sb-nav-fixed'
+    - var pageTitle = 'Datos de los sensores'
+    - var sidenavStyle = 'sb-sidenav-dark'
+
+block content
+    .container-fluid.px-4
+        include includes/page-header.pug
+        .row
+            .col-xl-4.col-md-6
+                .card.bg-primary.text-white.mb-4
+                    .card-body
+                        | accelerationX: 
+                    
+            .col-xl-4.col-md-6
+                .card.bg-warning.text-white.mb-4
+                    .card-body
+                        | accelerationXY: 
+                    
+            .col-xl-4.col-md-6
+                .card.bg-success.text-white.mb-4
+                    .card-body
+                        | accelerationXZ: 
+
+        .row
+            .col-xl-4.col-md-6
+                .card.bg-primary.text-white.mb-4
+                    .card-body
+                        | compassX: 
+                    
+            .col-xl-4.col-md-6
+                .card.bg-warning.text-white.mb-4
+                    .card-body
+                        | compassY: 
+
+            .col-xl-4.col-md-6
+                .card.bg-success.text-white.mb-4
+                    .card-body
+                        | compassZ: 
+
+        .row
+            .col-xl-4.col-md-6
+                .card.bg-primary.text-white.mb-4
+                    .card-body
+                        | gyroscopeX: 
+                    
+            .col-xl-4.col-md-6
+                .card.bg-warning.text-white.mb-4
+                    .card-body
+                        | gyroscopeY: 
+                    
+            .col-xl-4.col-md-6
+                .card.bg-success.text-white.mb-4
+                    .card-body
+                        | gyroscopeZ: 
+        
+        .row
+            .col-xl-4.col-md-6
+                .card.bg-primary.text-white.mb-4
+                    .card-body
+                        | magnetometerX: 
+                    
+            .col-xl-4.col-md-6
+                .card.bg-warning.text-white.mb-4
+                    .card-body
+                        | magnetometerY: 
+                    
+            .col-xl-4.col-md-6
+                .card.bg-success.text-white.mb-4
+                    .card-body
+                        | magnetometerZ: 
+        
+        .col-xl-12.col-md-6
+                .card.bg-success.text-white.mb-4
+                    .card-body
+                        | createAt:
+                   
+            
+append scripts
+    script(src='https://cdnjs.cloudflare.com/ajax/libs/Chart.js/2.8.0/Chart.min.js', crossorigin='anonymous')
+    script(src='assets/demo/chart-area-demo.js')
+    script(src='assets/demo/chart-bar-demo.js')
+    script(src='assets/demo/chart-pie-demo.js')
