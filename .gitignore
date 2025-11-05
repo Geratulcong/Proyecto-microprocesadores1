@@ -1,0 +1,23 @@
+# Archivos de datos procesados (muy grandes para GitHub)
+*.csv
+
+# Modelos entrenados
+*.h5
+*.save
+*.pkl
+
+# Cache de Python
+__pycache__/
+*.pyc
+*.pyo
+.cache/
+
+# Cache de Jupyter
+.ipynb_checkpoints/
+
+# Dataset SisFall descargado
+SisFall_dataset/
+
+# Archivos del sistema
+.DS_Store
+Thumbs.db
