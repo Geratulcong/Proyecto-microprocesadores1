@@ -1,0 +1,123 @@
+extends ../layouts/dashboard.pug
+
+block config
+    - var bodyClass = 'sb-nav-fixed'
+    - var pageTitle = 'Configuración de API y Registro de Caídas'
+    - var sidenavStyle = 'sb-sidenav-dark'
+
+block content
+    .container-fluid.px-4
+        include includes/page-header.pug
+
+        // 🔧 Título principal
+        h2.text-center.mb-4 Configuración de API y Registro de Caídas
+
+        // 📱 Configuración de la API
+        .card.mb-5.shadow
+            .card-header.bg-primary.text-white.text-center Configuración de API de WhatsApp
+            .card-body
+                form#apiConfigForm.w-50.mx-auto
+                    .mb-3
+                        label.form-label(for='phone') Número de teléfono
+                        input.form-control#phone(type='tel' name='phone' placeholder='+56912345678' required)
+                    .mb-3
+                        label.form-label(for='apiCode') Código API
+                        input.form-control#apiCode(type='text' name='apiCode' placeholder='Tu código CallMeBot' required)
+                    .text-end
+                        button.btn.btn-primary#saveApi(type='button') Guardar configuración
+                    small#saveStatus.text-muted.ms-2
+
+        // 🕓 Historial de caídas
+        .card.shadow
+            .card-header.bg-secondary.text-white.text-center Historial de caídas registradas
+            .card-body.text-center
+                button.btn.btn-danger.mb-3#simulateFall(type='button') Simular caída
+                table.table.table-bordered.mt-3.w-75.mx-auto
+                    thead
+                        tr
+                            th #
+                            th Fecha y hora
+                            th Estado
+                    tbody#alertTableBody
+
+append scripts
+    script.
+        (function() {
+            const saveBtn = document.getElementById('saveApi');
+            const simulateBtn = document.getElementById('simulateFall');
+            const phoneInput = document.getElementById('phone');
+            const apiInput = document.getElementById('apiCode');
+            const saveStatus = document.getElementById('saveStatus');
+            const tableBody = document.getElementById('alertTableBody');
+
+            // Cargar configuración y tabla
+            window.addEventListener('DOMContentLoaded', () => {
+                const saved = localStorage.getItem('apiConfig');
+                if (saved) {
+                    const cfg = JSON.parse(saved);
+                    phoneInput.value = cfg.phone || '';
+                    apiInput.value = cfg.apiCode || '';
+                }
+                const history = JSON.parse(localStorage.getItem('alertHistory') || '[]');
+                renderTable(history);
+            });
+
+            // Renderizar tabla
+            function renderTable(items) {
+                tableBody.innerHTML = '';
+                items.forEach((item, i) => {
+                    const tr = document.createElement('tr');
+                    tr.innerHTML = `
+                        <td>${i + 1}</td>
+                        <td>${item.time}</td>
+                        <td>${item.message}</td>
+                    `;
+                    tableBody.prepend(tr);
+                });
+            }
+
+            // Guardar configuración
+            saveBtn.addEventListener('click', () => {
+                const phone = phoneInput.value.trim();
+                const apiCode = apiInput.value.trim();
+                if (!phone || !apiCode) {
+                    saveStatus.textContent = '⚠️ Completa ambos campos.';
+                    return;
+                }
+                localStorage.setItem('apiConfig', JSON.stringify({ phone, apiCode }));
+                saveStatus.textContent = '✅ Configuración guardada.';
+                setTimeout(() => (saveStatus.textContent = ''), 2000);
+            });
+
+            // Simular caída
+            simulateBtn.addEventListener('click', async () => {
+                const cfg = JSON.parse(localStorage.getItem('apiConfig') || '{}');
+                if (!cfg.phone || !cfg.apiCode) {
+                    alert('Configura tu API primero.');
+                    return;
+                }
+
+                try {
+                    const res = await fetch('http://localhost:5000/send-alert', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            phone: cfg.phone,
+                            apiCode: cfg.apiCode,
+                            message: '⚠️ Alerta: caída detectada por el sistema!'
+                        })
+                    });
+                    const data = await res.json();
+
+                    const history = JSON.parse(localStorage.getItem('alertHistory') || '[]');
+                    const now = new Date().toLocaleString();
+                    const message = data.status === 'ok' ? 'Caída detectada' : 'Error al enviar alerta';
+                    history.push({ time: now, message });
+                    localStorage.setItem('alertHistory', JSON.stringify(history));
+                    renderTable(history);
+                } catch (err) {
+                    console.error(err);
+                    alert('⚠️ No se pudo conectar con el servidor Flask.');
+                }
+            });
+        })();
