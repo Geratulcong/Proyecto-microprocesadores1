@@ -24,7 +24,7 @@ if not INPUT_DIR.exists():
     print(f"   Crea la carpeta y coloca tus archivos .txt ahí\n")
     exit(1)
 
-archivos_txt = list(INPUT_DIR.glob("*.txt"))
+archivos_txt = list(INPUT_DIR.glob("*.csv")) + list(INPUT_DIR.glob("*.txt"))
 if not archivos_txt:
     print(f"❌ No se encontraron archivos .txt en '{INPUT_DIR}'")
     exit(1)
