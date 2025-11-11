@@ -56,19 +56,33 @@ void loop() {
     Serial.println(central.address());
 
     while (central.connected()) {
-      // Leer sensores
+      // Leer sensores del IMU (simularemos ambos sensores)
       if (IMU.accelerationAvailable()) {
-        IMU.readAcceleration(ax, ay, az);
+        IMU.readAcceleration(cadera_ax, cadera_ay, cadera_az);
+        // Si tienes 2 Arduinos, lee el segundo aquí
+        // Por ahora, usamos los mismos valores para ambos
+        pierna_ax = cadera_ax;
+        pierna_ay = cadera_ay;
+        pierna_az = cadera_az;
       }
       
       if (IMU.gyroscopeAvailable()) {
-        IMU.readGyroscope(gx, gy, gz);
+        IMU.readGyroscope(cadera_gx, cadera_gy, cadera_gz);
+        // Si tienes 2 Arduinos, lee el segundo aquí
+        // Por ahora, usamos los mismos valores para ambos
+        pierna_gx = cadera_gx;
+        pierna_gy = cadera_gy;
+        pierna_gz = cadera_gz;
       }
 
-      // Crear JSON con los 6 valores
+      // Crear JSON con los 12 valores (cadera + pierna)
       snprintf(jsonBuffer, sizeof(jsonBuffer),
-               "{\"ax\":%.4f,\"ay\":%.4f,\"az\":%.4f,\"gx\":%.4f,\"gy\":%.4f,\"gz\":%.4f}",
-               ax, ay, az, gx, gy, gz);
+               "{\"cadera_ax\":%.4f,\"cadera_ay\":%.4f,\"cadera_az\":%.4f,"
+               "\"cadera_gx\":%.4f,\"cadera_gy\":%.4f,\"cadera_gz\":%.4f,"
+               "\"pierna_ax\":%.4f,\"pierna_ay\":%.4f,\"pierna_az\":%.4f,"
+               "\"pierna_gx\":%.4f,\"pierna_gy\":%.4f,\"pierna_gz\":%.4f}",
+               cadera_ax, cadera_ay, cadera_az, cadera_gx, cadera_gy, cadera_gz,
+               pierna_ax, pierna_ay, pierna_az, pierna_gx, pierna_gy, pierna_gz);
 
       // Enviar por BLE
       sensorCharacteristic.writeValue(jsonBuffer);
