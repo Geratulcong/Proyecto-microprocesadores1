@@ -116,12 +116,6 @@ async def run_detector():
                         lectura["pierna_ax"], lectura["pierna_ay"], lectura["pierna_az"],
                         lectura["pierna_gx"], lectura["pierna_gy"], lectura["pierna_gz"]
                     ]
-                else:
-                    # Formato con 1 sensor (6 features)
-                    sample = [
-                        lectura["ax"], lectura["ay"], lectura["az"],
-                        lectura["gx"], lectura["gy"], lectura["gz"]
-                    ]
                 
                 buffer.append(sample)
                 
