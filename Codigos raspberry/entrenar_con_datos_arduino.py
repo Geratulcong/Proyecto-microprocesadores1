@@ -134,10 +134,14 @@ print(f"   Train: {len(X_train)} ventanas")
 print(f"   Test: {len(X_test)} ventanas")
 
 # --- 3. CREAR MODELO CNN SIMPLIFICADO ---
-print("\n🧠 Creando modelo CNN 1D simplificado (menos parámetros, más regularización)...")
+# Detectar número de features automáticamente
+num_features = X.shape[2]  # Puede ser 6 o 12
+print(f"\n🧠 Creando modelo CNN 1D para {num_features} features...")
+print("   Modelo simplificado (menos parámetros, más regularización)\n")
+
 model = Sequential([
     # Una sola capa convolucional más simple
-    Conv1D(16, kernel_size=3, activation='relu', input_shape=(WINDOW_SIZE, 6)),
+    Conv1D(16, kernel_size=3, activation='relu', input_shape=(WINDOW_SIZE, num_features)),
     MaxPooling1D(2),
     Dropout(0.5),  # Mayor dropout para prevenir overfitting
     

@@ -8,10 +8,15 @@ const char* deviceServiceCharacteristicUuid = "19b10001-e8f2-537e-4f6c-d104768a1
 BLEService sensorService(deviceServiceUuid);
 BLECharacteristic sensorCharacteristic(deviceServiceCharacteristicUuid, BLERead | BLENotify, 256);
 
-// Variables para sensores
-float ax, ay, az;
-float gx, gy, gz;
-char jsonBuffer[256];
+// Variables para sensores (2 sensores: cadera y pierna)
+// Nota: Como solo tenemos 1 Arduino, el segundo sensor puede ser simulado
+// o puedes usar dos Arduinos. Para este ejemplo usaremos el mismo sensor
+// con nombres diferentes.
+float cadera_ax, cadera_ay, cadera_az;
+float cadera_gx, cadera_gy, cadera_gz;
+float pierna_ax, pierna_ay, pierna_az;
+float pierna_gx, pierna_gy, pierna_gz;
+char jsonBuffer[512];  // Buffer más grande para 12 valores
 
 void setup() {
   Serial.begin(9600);

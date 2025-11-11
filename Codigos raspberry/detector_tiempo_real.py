@@ -107,11 +107,21 @@ async def run_detector():
                 json_str = data.decode("utf-8")
                 lectura = json.loads(json_str)
                 
-                # Extraer las 6 features
-                sample = [
-                    lectura["ax"], lectura["ay"], lectura["az"],
-                    lectura["gx"], lectura["gy"], lectura["gz"]
-                ]
+                # Extraer las features (6 o 12 dependiendo del Arduino)
+                if "cadera_ax" in lectura:
+                    # Formato con 2 sensores (12 features)
+                    sample = [
+                        lectura["cadera_ax"], lectura["cadera_ay"], lectura["cadera_az"],
+                        lectura["cadera_gx"], lectura["cadera_gy"], lectura["cadera_gz"],
+                        lectura["pierna_ax"], lectura["pierna_ay"], lectura["pierna_az"],
+                        lectura["pierna_gx"], lectura["pierna_gy"], lectura["pierna_gz"]
+                    ]
+                else:
+                    # Formato con 1 sensor (6 features)
+                    sample = [
+                        lectura["ax"], lectura["ay"], lectura["az"],
+                        lectura["gx"], lectura["gy"], lectura["gz"]
+                    ]
                 
                 buffer.append(sample)
                 
@@ -131,8 +141,9 @@ async def run_detector():
                         print("\n" + "─" * 60)
                         print("✅ Buffer completo. Iniciando detección...\n")
                     
-                    # Preparar datos
-                    X = np.array(buffer, dtype=np.float32).reshape(1, WINDOW_SIZE, 6)
+                    # Preparar datos (detectar automáticamente el número de features)
+                    num_features = len(buffer[0])
+                    X = np.array(buffer, dtype=np.float32).reshape(1, WINDOW_SIZE, num_features)
                     
                     # Predicción
                     pred = model.predict(X, verbose=0)
