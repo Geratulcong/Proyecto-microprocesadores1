@@ -1,0 +1,71 @@
+#include <ArduinoBLE.h>
+#include <Arduino_LSM9DS1.h>
+
+const int MUESTRAS_POR_SESION = 40;
+const unsigned long PERIODO_MS = 50;
+const unsigned long PAUSA_ENTRE_SESIONES = 5000;
+
+const char* SVC_UUID = "19b10000-e8f2-537e-4f6c-d104768a1214";
+const char* CHR_UUID = "19b10001-e8f2-537e-4f6c-d104768a1214";
+
+BLEService svc(SVC_UUID);
+BLECharacteristic chr(CHR_UUID, BLERead | BLENotify, 96);
+
+float ax, ay, az, gx, gy, gz;
+char lineBuf[128];
+unsigned long lastSampleMillis = 0;
+int sendCount = 0;
+int sendErrors = 0;
+
+void setup() {
+  Serial.begin(115200);
+  pinMode(LED_BUILTIN, OUTPUT);
+  if (!BLE.begin()) { Serial.println("BLE ERR"); while(1); }
+  if (!IMU.begin())  { Serial.println("IMU ERR"); while(1); }
+  BLE.setLocalName("NanoSense33-Pierna");
+  svc.addCharacteristic(chr);
+  BLE.addService(svc);
+  BLE.advertise();
+  Serial.println("Pierna DEBUG listo");
+}
+
+void loop() {
+  BLEDevice central = BLE.central();
+  if (!central) { BLE.poll(); delay(50); return; }
+
+  Serial.print("Central conectado: "); Serial.println(central.address());
+  while (central.connected()) {
+    for (int i = 0; i < MUESTRAS_POR_SESION && central.connected(); ++i) {
+      while (millis() - lastSampleMillis < PERIODO_MS) {
+        BLE.poll();
+        delay(1);
+      }
+      lastSampleMillis = millis();
+
+      IMU.readAcceleration(ax, ay, az);
+      IMU.readGyroscope(gx, gy, gz);
+      int n = snprintf(lineBuf, sizeof(lineBuf), "%.3f,%.3f,%.3f,%.3f,%.3f,%.3f\n",
+                       ax, ay, az, gx, gy, gz);
+      bool ok = chr.writeValue((uint8_t*)lineBuf, n);
+      if (!ok) sendErrors++;
+      sendCount++;
+
+      // imprimir solo cada 10 envíos para no bloquear
+      if (sendCount % 10 == 0) {
+        Serial.print("ENVÍOS:"); Serial.print(sendCount);
+        Serial.print("  ERRS:"); Serial.println(sendErrors);
+      }
+      // parpadeo LED para ver actividad física
+      digitalWrite(LED_BUILTIN, sendCount & 1);
+    }
+
+    unsigned long t0 = millis();
+    while (millis() - t0 < PAUSA_ENTRE_SESIONES && central.connected()) {
+      BLE.poll();
+      delay(20);
+    }
+  }
+
+  Serial.println("Central desconectado");
+  BLE.advertise();
+}

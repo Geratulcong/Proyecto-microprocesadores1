@@ -1,0 +1,197 @@
+#include <ArduinoBLE.h>
+#include <Arduino_LSM9DS1.h>
+
+const int MUESTRAS_POR_SESION = 40;
+const unsigned long PERIODO_MS = 50;
+const unsigned long PAUSA_ENTRE_SESIONES = 5000;
+
+const char* PIERNA_NAME = "NanoSense33-Pierna";
+const char* SVC_UUID    = "19b10000-e8f2-537e-4f6c-d104768a1214";
+const char* CHR_UUID    = "19b10001-e8f2-537e-4f6c-d104768a1214";
+
+const unsigned long SCAN_MS = 6000;
+const unsigned long RECONNECT_DELAY = 2000;
+const unsigned long NOTIF_TIMEOUT = 5000;
+
+BLEService svcOut(SVC_UUID);
+BLECharacteristic chrOut(CHR_UUID, BLERead | BLENotify, 200);
+
+BLEDevice piernaDev;
+BLECharacteristic piernaChr;
+
+unsigned long lastScanAttempt = 0;
+unsigned long lastNotifTime = 0;
+unsigned long localSeq = 0;
+
+bool scanAndConnectPierna() {
+  if (millis() - lastScanAttempt < RECONNECT_DELAY) return false;
+  lastScanAttempt = millis();
+
+  // Inicio escaneo SIN detener advertise (algunos stacks permiten ambos)
+  BLE.scanForName(PIERNA_NAME);
+  unsigned long t0 = millis();
+  while (millis() - t0 < SCAN_MS) {
+    BLEDevice d = BLE.available();
+    if (d && d.localName() == PIERNA_NAME) {
+      BLE.stopScan();
+      // intentar conectar con reintentos simples
+      for (int r=0; r<3; ++r) {
+        if (d.connect()) {
+          delay(120);
+          if (d.discoverAttributes()) {
+            BLECharacteristic remote = d.characteristic(CHR_UUID);
+            if (remote) {
+              if (remote.subscribe()) {
+                piernaDev = d;
+                piernaChr = remote;
+                lastNotifTime = millis();
+                return true;
+              } else {
+                d.disconnect();
+              }
+            } else {
+              d.disconnect();
+            }
+          } else {
+            d.disconnect();
+          }
+        }
+        delay(200 + r*50);
+      }
+      return false;
+    }
+    BLE.poll();
+    delay(5);
+  }
+  BLE.stopScan();
+  return false;
+}
+
+void tryResubscribe() {
+  if (!piernaDev || !piernaDev.connected() || !piernaChr) return;
+  for (int i=0;i<3;i++){
+    if (piernaChr.subscribe()) { lastNotifTime = millis(); return; }
+    delay(150);
+  }
+  // si no se consiguió re-subscribir, desconectar para reconectar limpio
+  piernaDev.disconnect();
+  piernaDev = BLEDevice();
+  piernaChr = BLECharacteristic();
+  lastNotifTime = 0;
+}
+
+void setup() {
+  Serial.begin(115200);
+  delay(200);
+  if (!IMU.begin()) { Serial.println("IMU ERR"); while (1); }
+  if (!BLE.begin()) { Serial.println("BLE ERR"); while (1); }
+
+  BLE.setLocalName("NanoSense33-Cadera");
+  svcOut.addCharacteristic(chrOut);
+  BLE.addService(svcOut);
+  BLE.advertise(); // mantener advertising activo
+
+  Serial.println("Cadera lista: advertising activo y buscando Pierna.");
+}
+
+void enviarToPC(const char* buf, int len) {
+  if (len>0) chrOut.writeValue((uint8_t*)buf, len);
+}
+
+void loop() {
+  // detectar si PC (central) conectado a esta Cadera (peripheral)
+  BLEDevice centralPC = BLE.central();
+  static bool pcConnected = false;
+  if (centralPC) {
+    if (centralPC.connected() && !pcConnected) {
+      pcConnected = true;
+    } else if (!centralPC.connected() && pcConnected) {
+      pcConnected = false;
+    }
+  }
+
+  // si no estamos conectados a pierna, intentar
+  if (!piernaDev || !piernaDev.connected()) {
+    scanAndConnectPierna();
+  }
+
+  // si estamos conectados a pierna, procesar notifs reactivamente
+  if (piernaDev && piernaDev.connected() && piernaChr) {
+    int muestras = 0;
+    while (muestras < MUESTRAS_POR_SESION && piernaDev.connected()) {
+      BLE.poll();
+      if (piernaChr.valueUpdated()) {
+        uint8_t buf[128];
+        int got = piernaChr.readValue(buf, sizeof(buf)-1);
+        if (got <= 0) continue;
+        buf[got] = '\0';
+        lastNotifTime = millis();
+
+        // parse pierna (ax,ay,az,gx,gy,gz) o "HB"
+        char tmp[128]; strncpy(tmp, (char*)buf, sizeof(tmp)-1); tmp[sizeof(tmp)-1]=0;
+        char *toks[8]; int tn=0; char *tk=strtok(tmp,",");
+        while (tk && tn<8) { toks[tn++]=tk; tk=strtok(NULL,","); }
+
+        float p_ax=0,p_ay=0,p_az=0,p_gx=0,p_gy=0,p_gz=0;
+        bool isHB=false;
+        if (tn>=1 && (strcmp(toks[0],"HB")==0 || strcmp(toks[0],"hb")==0)) isHB=true;
+        else if (tn>=6) {
+          p_ax = atof(toks[0]); p_ay = atof(toks[1]); p_az = atof(toks[2]);
+          p_gx = atof(toks[3]); p_gy = atof(toks[4]); p_gz = atof(toks[5]);
+        }
+
+        // leer IMU local inmediatamente
+        float c_ax=0,c_ay=0,c_az=0,c_gx=0,c_gy=0,c_gz=0;
+        IMU.readAcceleration(c_ax,c_ay,c_az);
+        IMU.readGyroscope(c_gx,c_gy,c_gz);
+        localSeq++;
+
+        // construir y enviar CSV combinado (sin timestamps ni seq)
+        char out[220];
+        int L;
+        if (isHB) {
+          L = snprintf(out, sizeof(out), "%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,HB\n",
+                       c_ax,c_ay,c_az,c_gx,c_gy,c_gz);
+        } else {
+          L = snprintf(out, sizeof(out),
+                       "%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f\n",
+                       c_ax,c_ay,c_az,c_gx,c_gy,c_gz,
+                       p_ax,p_ay,p_az,p_gx,p_gy,p_gz);
+        }
+
+        if (pcConnected) enviarToPC(out, L);
+        muestras++;
+      }
+
+      // si no llegan notifs por mucho tiempo, intentar recuperación suave
+      if (lastNotifTime != 0 && (millis() - lastNotifTime > NOTIF_TIMEOUT)) {
+        tryResubscribe();
+        if (!piernaDev || !piernaDev.connected()) break; // salir y reintentar conectar
+      }
+      delay(1);
+    }
+
+    // pausa 5s manteniendo advertising y poll
+    unsigned long t0 = millis();
+    while (millis() - t0 < PAUSA_ENTRE_SESIONES) { BLE.poll(); delay(20); }
+  } else {
+    // sesión local si no hay pierna conectada
+    for (int i=0;i<MUESTRAS_POR_SESION;i++) {
+      unsigned long t0 = millis();
+      while (millis() - t0 < PERIODO_MS) { BLE.poll(); delay(1); }
+      float c_ax=0,c_ay=0,c_az=0,c_gx=0,c_gy=0,c_gz=0;
+      IMU.readAcceleration(c_ax,c_ay,c_az);
+      IMU.readGyroscope(c_gx,c_gy,c_gz);
+      char outc[200];
+      int L = snprintf(outc, sizeof(outc),
+                       "%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,0,0,0,0,0,0\n",
+                       c_ax,c_ay,c_az,c_gx,c_gy,c_gz);
+      if (pcConnected) enviarToPC(outc, L);
+    }
+    unsigned long t1 = millis();
+    while (millis() - t1 < PAUSA_ENTRE_SESIONES) { BLE.poll(); delay(20); }
+  }
+
+  BLE.poll();
+  delay(2);
+}
