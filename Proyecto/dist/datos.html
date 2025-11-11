@@ -6,7 +6,7 @@
         <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no" />
         <meta name="description" content="" />
         <meta name="author" content="" />
-        <title>Datos de los sensores - SB Admin</title>
+        <title>Configuración de API y Registro de Caídas - SB Admin</title>
         <link href="css/styles.css" rel="stylesheet" />
         <script src="https://use.fontawesome.com/releases/v6.3.0/js/all.js" crossorigin="anonymous"></script>
     </head>
@@ -113,57 +113,47 @@
             <div id="layoutSidenav_content">
                 <main>
                     <div class="container-fluid px-4">
-                        <h1 class="mt-4">Datos de los sensores</h1>
+                        <h1 class="mt-4">Configuración de API y Registro de Caídas</h1>
                         <ol class="breadcrumb mb-4">
                             <li class="breadcrumb-item"><a href="index.html">Dashboard</a></li>
-                            <li class="breadcrumb-item active">Datos de los sensores</li>
+                            <li class="breadcrumb-item active">Configuración de API y Registro de Caídas</li>
                         </ol>
-                        <div class="row">
-                            <div class="col-xl-4 col-md-6">
-                                <div class="card bg-primary text-white mb-4"><div class="card-body">accelerationX:</div></div>
-                            </div>
-                            <div class="col-xl-4 col-md-6">
-                                <div class="card bg-warning text-white mb-4"><div class="card-body">accelerationXY:</div></div>
-                            </div>
-                            <div class="col-xl-4 col-md-6">
-                                <div class="card bg-success text-white mb-4"><div class="card-body">accelerationXZ:</div></div>
-                            </div>
-                        </div>
-                        <div class="row">
-                            <div class="col-xl-4 col-md-6">
-                                <div class="card bg-primary text-white mb-4"><div class="card-body">compassX:</div></div>
-                            </div>
-                            <div class="col-xl-4 col-md-6">
-                                <div class="card bg-warning text-white mb-4"><div class="card-body">compassY:</div></div>
-                            </div>
-                            <div class="col-xl-4 col-md-6">
-                                <div class="card bg-success text-white mb-4"><div class="card-body">compassZ:</div></div>
+                        <!-- 🔧 Título principal-->
+                        <h2 class="text-center mb-4">Configuración de API y Registro de Caídas</h2>
+                        <!-- 📱 Configuración de la API-->
+                        <div class="card mb-5 shadow">
+                            <div class="card-header bg-primary text-white text-center">Configuración de API de WhatsApp</div>
+                            <div class="card-body">
+                                <form class="w-50 mx-auto" id="apiConfigForm">
+                                    <div class="mb-3">
+                                        <label class="form-label" for="phone">Número de teléfono</label>
+                                        <input class="form-control" id="phone" type="tel" name="phone" placeholder="+56912345678" required />
+                                    </div>
+                                    <div class="mb-3">
+                                        <label class="form-label" for="apiCode">Código API</label>
+                                        <input class="form-control" id="apiCode" type="text" name="apiCode" placeholder="Tu código CallMeBot" required />
+                                    </div>
+                                    <div class="text-end"><button class="btn btn-primary" id="saveApi" type="button">Guardar configuración</button></div>
+                                    <small class="text-muted ms-2" id="saveStatus"></small>
+                                </form>
                             </div>
                         </div>
-                        <div class="row">
-                            <div class="col-xl-4 col-md-6">
-                                <div class="card bg-primary text-white mb-4"><div class="card-body">gyroscopeX:</div></div>
+                        <!-- 🕓 Historial de caídas-->
+                        <div class="card shadow">
+                            <div class="card-header bg-secondary text-white text-center">Historial de caídas registradas</div>
+                            <div class="card-body text-center">
+                                <button class="btn btn-danger mb-3" id="simulateFall" type="button">Simular caída</button>
+                                <table class="table table-bordered mt-3 w-75 mx-auto">
+                                    <thead>
+                                        <tr>
+                                            <th>#</th>
+                                            <th>Fecha y hora</th>
+                                            <th>Estado</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="alertTableBody"></tbody>
+                                </table>
                             </div>
-                            <div class="col-xl-4 col-md-6">
-                                <div class="card bg-warning text-white mb-4"><div class="card-body">gyroscopeY:</div></div>
-                            </div>
-                            <div class="col-xl-4 col-md-6">
-                                <div class="card bg-success text-white mb-4"><div class="card-body">gyroscopeZ:</div></div>
-                            </div>
-                        </div>
-                        <div class="row">
-                            <div class="col-xl-4 col-md-6">
-                                <div class="card bg-primary text-white mb-4"><div class="card-body">magnetometerX:</div></div>
-                            </div>
-                            <div class="col-xl-4 col-md-6">
-                                <div class="card bg-warning text-white mb-4"><div class="card-body">magnetometerY:</div></div>
-                            </div>
-                            <div class="col-xl-4 col-md-6">
-                                <div class="card bg-success text-white mb-4"><div class="card-body">magnetometerZ:</div></div>
-                            </div>
-                        </div>
-                        <div class="col-xl-12 col-md-6">
-                            <div class="card bg-success text-white mb-4"><div class="card-body">createAt:</div></div>
                         </div>
                     </div>
                 </main>
@@ -183,9 +173,86 @@
         </div>
         <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.2.3/dist/js/bootstrap.bundle.min.js" crossorigin="anonymous"></script>
         <script src="js/scripts.js"></script>
-        <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/2.8.0/Chart.min.js" crossorigin="anonymous"></script>
-        <script src="assets/demo/chart-area-demo.js"></script>
-        <script src="assets/demo/chart-bar-demo.js"></script>
-        <script src="assets/demo/chart-pie-demo.js"></script>
+        <script>
+            (function () {
+                const saveBtn = document.getElementById('saveApi');
+                const simulateBtn = document.getElementById('simulateFall');
+                const phoneInput = document.getElementById('phone');
+                const apiInput = document.getElementById('apiCode');
+                const saveStatus = document.getElementById('saveStatus');
+                const tableBody = document.getElementById('alertTableBody');
+
+                // Cargar configuración y tabla
+                window.addEventListener('DOMContentLoaded', () => {
+                    const saved = localStorage.getItem('apiConfig');
+                    if (saved) {
+                        const cfg = JSON.parse(saved);
+                        phoneInput.value = cfg.phone || '';
+                        apiInput.value = cfg.apiCode || '';
+                    }
+                    const history = JSON.parse(localStorage.getItem('alertHistory') || '[]');
+                    renderTable(history);
+                });
+
+                // Renderizar tabla
+                function renderTable(items) {
+                    tableBody.innerHTML = '';
+                    items.forEach((item, i) => {
+                        const tr = document.createElement('tr');
+                        tr.innerHTML = `
+                <td>${i + 1}</td>
+                <td>${item.time}</td>
+                <td>${item.message}</td>
+            `;
+                        tableBody.prepend(tr);
+                    });
+                }
+
+                // Guardar configuración
+                saveBtn.addEventListener('click', () => {
+                    const phone = phoneInput.value.trim();
+                    const apiCode = apiInput.value.trim();
+                    if (!phone || !apiCode) {
+                        saveStatus.textContent = '⚠️ Completa ambos campos.';
+                        return;
+                    }
+                    localStorage.setItem('apiConfig', JSON.stringify({ phone, apiCode }));
+                    saveStatus.textContent = '✅ Configuración guardada.';
+                    setTimeout(() => (saveStatus.textContent = ''), 2000);
+                });
+
+                // Simular caída
+                simulateBtn.addEventListener('click', async () => {
+                    const cfg = JSON.parse(localStorage.getItem('apiConfig') || '{}');
+                    if (!cfg.phone || !cfg.apiCode) {
+                        alert('Configura tu API primero.');
+                        return;
+                    }
+
+                    try {
+                        const res = await fetch('http://localhost:5000/send-alert', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({
+                                phone: cfg.phone,
+                                apiCode: cfg.apiCode,
+                                message: '⚠️ Alerta: caída detectada por el sistema!',
+                            }),
+                        });
+                        const data = await res.json();
+
+                        const history = JSON.parse(localStorage.getItem('alertHistory') || '[]');
+                        const now = new Date().toLocaleString();
+                        const message = data.status === 'ok' ? 'Caída detectada' : 'Error al enviar alerta';
+                        history.push({ time: now, message });
+                        localStorage.setItem('alertHistory', JSON.stringify(history));
+                        renderTable(history);
+                    } catch (err) {
+                        console.error(err);
+                        alert('⚠️ No se pudo conectar con el servidor Flask.');
+                    }
+                });
+            })();
+        </script>
     </body>
 </html>
