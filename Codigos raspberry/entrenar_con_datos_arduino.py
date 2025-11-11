@@ -32,40 +32,82 @@ if not DATOS_DIR.exists():
     print(f"❌ Error: Ejecuta primero 'limpiar_datos.py'")
     exit(1)
 
-archivos = list(DATOS_DIR.glob("*.txt"))
+# Buscar archivos CSV
+archivos_csv = list(DATOS_DIR.glob("*.csv"))
+archivos_txt = list(DATOS_DIR.glob("*.txt"))
+archivos = archivos_csv if archivos_csv else archivos_txt
+
 if not archivos:
-    print(f"❌ No se encontraron archivos .txt en '{DATOS_DIR}'")
+    print(f"❌ No se encontraron archivos .csv o .txt en '{DATOS_DIR}'")
     exit(1)
 
 print(f"📄 Archivos encontrados: {len(archivos)}\n")
 
-# Clasificar archivos según su nombre
-print("🔖 Clasifica tus archivos:")
-print("   Escribe 0 para NORMAL (sin caída)")
-print("   Escribe 1 para CAÍDA\n")
-
+# Clasificar archivos automáticamente según su nombre
 datos_totales = []
 etiquetas_totales = []
 
 for archivo in archivos:
     print(f"📄 {archivo.name}")
-    while True:
-        etiqueta = input("   Etiqueta (0=normal, 1=caída): ").strip()
-        if etiqueta in ['0', '1']:
-            etiqueta = int(etiqueta)
-            break
-        print("   ❌ Valor inválido. Usa 0 o 1")
+    
+    # Detectar automáticamente si es caída o normal por el nombre
+    nombre_lower = archivo.name.lower()
+    if 'caida' in nombre_lower or 'fall' in nombre_lower:
+        etiqueta = 1
+        tipo = "CAÍDA"
+    elif 'normal' in nombre_lower or 'adl' in nombre_lower:
+        etiqueta = 0
+        tipo = "NORMAL"
+    else:
+        # Si no se detecta automáticamente, preguntar
+        while True:
+            resp = input("   Etiqueta (0=normal, 1=caída): ").strip()
+            if resp in ['0', '1']:
+                etiqueta = int(resp)
+                tipo = "NORMAL" if etiqueta == 0 else "CAÍDA"
+                break
+            print("   ❌ Valor inválido. Usa 0 o 1")
+    
+    print(f"   🏷️  Clasificado como: {tipo}")
     
     # Cargar archivo
     try:
         df = pd.read_csv(archivo)
-        print(f"   ✅ Cargado: {len(df)} muestras\n")
+        
+        # Detectar columnas disponibles
+        columnas = df.columns.tolist()
+        
+        # Seleccionar columnas según lo disponible
+        if 'cadera_ax' in columnas and 'pierna_ax' in columnas:
+            # Usar datos de AMBOS sensores (12 features)
+            cols = [
+                'cadera_ax', 'cadera_ay', 'cadera_az', 'cadera_gx', 'cadera_gy', 'cadera_gz',
+                'pierna_ax', 'pierna_ay', 'pierna_az', 'pierna_gx', 'pierna_gy', 'pierna_gz'
+            ]
+            print(f"   📍 Usando datos de CADERA + PIERNA (12 features)")
+        elif 'cadera_ax' in columnas:
+            # Usar solo datos de la cadera
+            cols = ['cadera_ax', 'cadera_ay', 'cadera_az', 'cadera_gx', 'cadera_gy', 'cadera_gz']
+            print(f"   📍 Usando datos del sensor de CADERA (6 features)")
+        elif 'ax' in columnas:
+            # Usar datos directos
+            cols = ['ax', 'ay', 'az', 'gx', 'gy', 'gz']
+            print(f"   📍 Usando datos del sensor único (6 features)")
+        else:
+            print(f"   ❌ Error: Columnas no reconocidas: {columnas}")
+            continue
+        
+        print(f"   ✅ Cargado: {len(df)} muestras")
         
         # Crear ventanas con solapamiento
+        ventanas_creadas = 0
         for i in range(0, len(df) - WINDOW_SIZE + 1, OVERLAP):
-            ventana = df.iloc[i:i+WINDOW_SIZE][['ax','ay','az','gx','gy','gz']].values
+            ventana = df.iloc[i:i+WINDOW_SIZE][cols].values
             datos_totales.append(ventana)
             etiquetas_totales.append(etiqueta)
+            ventanas_creadas += 1
+        
+        print(f"   📊 Ventanas creadas: {ventanas_creadas}\n")
     
     except Exception as e:
         print(f"   ❌ Error: {e}\n")
@@ -91,20 +133,18 @@ X_train, X_test, y_train, y_test = train_test_split(
 print(f"   Train: {len(X_train)} ventanas")
 print(f"   Test: {len(X_test)} ventanas")
 
-# --- 3. CREAR MODELO CNN ---
-print("\n🧠 Creando modelo CNN 1D...")
+# --- 3. CREAR MODELO CNN SIMPLIFICADO ---
+print("\n🧠 Creando modelo CNN 1D simplificado (menos parámetros, más regularización)...")
 model = Sequential([
-    Conv1D(32, kernel_size=3, activation='relu', input_shape=(WINDOW_SIZE, 6)),
+    # Una sola capa convolucional más simple
+    Conv1D(16, kernel_size=3, activation='relu', input_shape=(WINDOW_SIZE, 6)),
     MaxPooling1D(2),
-    Dropout(0.3),
+    Dropout(0.5),  # Mayor dropout para prevenir overfitting
     
-    Conv1D(64, kernel_size=3, activation='relu'),
-    MaxPooling1D(2),
-    Dropout(0.3),
-    
+    # Capa densa más pequeña
     Flatten(),
-    Dense(64, activation='relu'),
-    Dropout(0.4),
+    Dense(32, activation='relu'),
+    Dropout(0.5),
     Dense(1, activation='sigmoid')  # Binario: 0=normal, 1=caída
 ])
 
@@ -113,7 +153,13 @@ model.summary()
 
 # --- 4. ENTRENAR ---
 print("\n🚀 Entrenando modelo...")
-early_stop = EarlyStopping(monitor='val_loss', patience=10, restore_best_weights=True)
+print("💡 Modelo simplificado para reducir overfitting:")
+print("   - Solo 1 capa Conv1D (en vez de 2)")
+print("   - 16 filtros (en vez de 32+64)")
+print("   - Dense de 32 neuronas (en vez de 64)")
+print("   - Dropout aumentado a 0.5\n")
+
+early_stop = EarlyStopping(monitor='val_loss', patience=15, restore_best_weights=True)
 
 history = model.fit(
     X_train, y_train,

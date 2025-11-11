@@ -18,6 +18,10 @@ __pycache__/
 # Dataset SisFall descargado
 SisFall_dataset/
 
+# Credenciales de Firebase (NUNCA subir esto)
+firebase-credentials.json
+*firebase-credentials*.json
+
 # Archivos del sistema
 .DS_Store
 Thumbs.db
