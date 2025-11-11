@@ -6,44 +6,8 @@ import asyncio
 import json
 import numpy as np
 from pathlib import Path
-from urllib.parse import quote
 from bleak import BleakClient, BleakScanner
-import requests
 from tensorflow.keras.models import load_model
-
-# 🔧 Configura tus datos:
-phone = '56940551619'  # tu número SIN el + (ej: 56998765432)
-apikey = '4253930'  # la API Key que te dio CallMeBot
-message = '⚠️ Alerta: caída detectada en el sensor del brazo!'  # tu mensaje
-
-# 🔗 Construimos la URL del mensaje (con codificación URL)
-mensaje_codificado = quote(message)
-url = f'https://api.callmebot.com/whatsapp.php?phone={phone}&text={mensaje_codificado}&apikey={apikey}'
-
-# --- FUNCIÓN PARA ENVIAR WHATSAPP ---
-def enviar_whatsapp():
-    """Envía mensaje de WhatsApp de forma síncrona"""
-    try:
-        print(f'📱 Enviando mensaje a WhatsApp (+{phone})...')
-        response = requests.get(url, timeout=10)
-        
-        if response.status_code == 200:
-            print('✅ Mensaje enviado correctamente!')
-            print(f'   Respuesta: {response.text}')
-            return True
-        else:
-            print(f'❌ Error al enviar mensaje.')
-            print(f'   Código HTTP: {response.status_code}')
-            print(f'   Detalle: {response.text}')
-            return False
-    except requests.exceptions.Timeout:
-        print('⏱️  Timeout - El servidor no respondió a tiempo')
-        return False
-    except requests.exceptions.RequestException as e:
-        print(f'❌ Error de conexión: {e}')
-        return False
-
-
 
 # --- CONFIGURACIÓN BLE ---
 DEVICE_NAME = "NanoSense33-Caidas"
@@ -148,7 +112,7 @@ async def run_detector():
                     if es_caida:
                         if prob_caida > 0.8:
                             print(f"🚨🚨 ¡ALERTA! CAÍDA DETECTADA (confianza: {prob_caida:.1%}) 🚨🚨")
-                            enviar_whatsapp()  # Llamar función de envío
+                            # Aquí puedes implementar el envío de alerta (Firebase, API, etc.)
                         elif prediccion_anterior != es_caida:
                             print(f"⚠️  Posible caída (confianza: {prob_caida:.1%})")
                         prediccion_anterior = es_caida

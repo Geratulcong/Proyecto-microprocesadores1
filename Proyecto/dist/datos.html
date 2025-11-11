@@ -140,9 +140,16 @@
                         </div>
                         <!-- 🕓 Historial de caídas-->
                         <div class="card shadow">
-                            <div class="card-header bg-secondary text-white text-center">Historial de caídas registradas</div>
+                            <div class="card-header bg-secondary text-white d-flex justify-content-between align-items-center">
+                                <span>Historial de caídas registradas</span>
+                                <button class="btn btn-sm btn-light" id="refreshHistory" type="button" title="Actualizar historial">
+                                    <i class="fas fa-sync-alt"></i>
+                                    Actualizar
+                                </button>
+                            </div>
                             <div class="card-body text-center">
                                 <button class="btn btn-danger mb-3" id="simulateFall" type="button">Simular caída</button>
+                                <div class="mb-2"><small class="text-muted" id="lastUpdate">Última actualización: --</small></div>
                                 <table class="table table-bordered mt-3 w-75 mx-auto">
                                     <thead>
                                         <tr>
@@ -173,14 +180,34 @@
         </div>
         <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.2.3/dist/js/bootstrap.bundle.min.js" crossorigin="anonymous"></script>
         <script src="js/scripts.js"></script>
+        <!-- Firebase SDK-->
+        <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
+        <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore-compat.js"></script>
         <script>
+            // 🔥 Configuración de Firebase
+            const firebaseConfig = {
+                apiKey: 'AIzaSyDGQBWrAA1yVMnv-oQzSSYz9_YSb4A1Lhk',
+                authDomain: 'detector-de-caidas-360.firebaseapp.com',
+                projectId: 'detector-de-caidas-360',
+                storageBucket: 'detector-de-caidas-360.firebasestorage.app',
+                messagingSenderId: '1064686963699',
+                appId: '1:1064686963699:web:df69b06a1dc3e3a29e7ed4',
+            };
+
+            // Inicializar Firebase
+            firebase.initializeApp(firebaseConfig);
+            const db = firebase.firestore();
+
             (function () {
                 const saveBtn = document.getElementById('saveApi');
                 const simulateBtn = document.getElementById('simulateFall');
+                const refreshBtn = document.getElementById('refreshHistory');
                 const phoneInput = document.getElementById('phone');
                 const apiInput = document.getElementById('apiCode');
                 const saveStatus = document.getElementById('saveStatus');
                 const tableBody = document.getElementById('alertTableBody');
+                const lastUpdateEl = document.getElementById('lastUpdate');
+                const PERSONA = 'Vicente'; // Nombre de la persona
 
                 // Cargar configuración y tabla
                 window.addEventListener('DOMContentLoaded', () => {
@@ -190,23 +217,93 @@
                         phoneInput.value = cfg.phone || '';
                         apiInput.value = cfg.apiCode || '';
                     }
-                    const history = JSON.parse(localStorage.getItem('alertHistory') || '[]');
-                    renderTable(history);
+                    loadHistory();
                 });
 
-                // Renderizar tabla
-                function renderTable(items) {
+                // Cargar historial desde Firebase
+                async function loadHistory() {
+                    try {
+                        tableBody.innerHTML = '<tr><td colspan="3" class="text-center">🔄 Cargando desde Firebase...</td></tr>';
+
+                        const snapshot = await db.collection('Historial').doc('Personas').collection(PERSONA).orderBy('hora_caida', 'desc').limit(20).get();
+
+                        const caidas = [];
+                        snapshot.forEach((doc) => {
+                            const data = doc.data();
+                            caidas.push({ id: doc.id, ...data });
+                        });
+
+                        renderTableFromFirebase(caidas);
+                        updateLastUpdateTime();
+                    } catch (error) {
+                        console.error('Error al cargar desde Firebase:', error);
+                        tableBody.innerHTML = '<tr><td colspan="3" class="text-center text-danger">❌ Error: ' + error.message + '</td></tr>';
+                        updateLastUpdateTime();
+                    }
+                }
+
+                // Actualizar timestamp
+                function updateLastUpdateTime() {
+                    const now = new Date().toLocaleString('es-ES');
+                    lastUpdateEl.textContent = `Última actualización: ${now}`;
+                }
+
+                // Renderizar tabla desde Firebase
+                function renderTableFromFirebase(caidas) {
                     tableBody.innerHTML = '';
-                    items.forEach((item, i) => {
+
+                    if (caidas.length === 0) {
+                        tableBody.innerHTML = '<tr><td colspan="3" class="text-muted">No hay caídas registradas en Firebase</td></tr>';
+                        return;
+                    }
+
+                    caidas.forEach((caida, i) => {
                         const tr = document.createElement('tr');
+
+                        // Convertir timestamp
+                        let fecha = 'N/A';
+                        if (caida.hora_caida) {
+                            if (caida.hora_caida.toDate) {
+                                fecha = caida.hora_caida.toDate().toLocaleString('es-ES');
+                            } else if (caida.hora_caida.seconds) {
+                                fecha = new Date(caida.hora_caida.seconds * 1000).toLocaleString('es-ES');
+                            }
+                        }
+
+                        const tipo = caida.tipo || 'Caída detectada';
+                        const estado = caida.estado || 'Pendiente';
+                        const confianza = caida.confianza ? `${(caida.confianza * 100).toFixed(0)}%` : 'N/A';
+                        const ubicacion = caida.ubicacion || 'Desconocida';
+
+                        let estadoClass = 'bg-warning';
+                        if (estado === 'Atendido') estadoClass = 'bg-success';
+                        if (estado === 'Falsa alarma') estadoClass = 'bg-secondary';
+
                         tr.innerHTML = `
                 <td>${i + 1}</td>
-                <td>${item.time}</td>
-                <td>${item.message}</td>
+                <td>
+                    <strong>${fecha}</strong><br>
+                    <small class="text-muted">📍 ${ubicacion} | 🎯 ${confianza}</small>
+                </td>
+                <td>
+                    <span class="badge ${estadoClass}">${estado}</span><br>
+                    <small>${tipo}</small>
+                </td>
             `;
-                        tableBody.prepend(tr);
+                        tableBody.appendChild(tr);
                     });
                 }
+
+                // Botón actualizar
+                refreshBtn.addEventListener('click', () => {
+                    refreshBtn.disabled = true;
+                    refreshBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Actualizando...';
+
+                    loadHistory().finally(() => {
+                        refreshBtn.disabled = false;
+                        refreshBtn.innerHTML = '<i class="fas fa-sync-alt"></i> Actualizar';
+                    });
+                });
 
                 // Guardar configuración
                 saveBtn.addEventListener('click', () => {
@@ -230,6 +327,10 @@
                     }
 
                     try {
+                        simulateBtn.disabled = true;
+                        simulateBtn.textContent = '⏳ Procesando...';
+
+                        // Enviar alerta por WhatsApp
                         const res = await fetch('http://localhost:5000/send-alert', {
                             method: 'POST',
                             headers: { 'Content-Type': 'application/json' },
@@ -241,17 +342,36 @@
                         });
                         const data = await res.json();
 
-                        const history = JSON.parse(localStorage.getItem('alertHistory') || '[]');
-                        const now = new Date().toLocaleString();
-                        const message = data.status === 'ok' ? 'Caída detectada' : 'Error al enviar alerta';
-                        history.push({ time: now, message });
-                        localStorage.setItem('alertHistory', JSON.stringify(history));
-                        renderTable(history);
+                        // Guardar en Firebase
+                        await db
+                            .collection('Historial')
+                            .doc('Personas')
+                            .collection(PERSONA)
+                            .add({
+                                hora_caida: firebase.firestore.Timestamp.now(),
+                                tipo: 'Caída simulada',
+                                confianza: 0.95,
+                                ubicacion: 'Simulación web',
+                                aceleracion_max: 3.2,
+                                estado: data.status === 'ok' ? 'Pendiente' : 'Error al enviar',
+                                sensor: 'Simulación manual',
+                                timestamp_servidor: firebase.firestore.FieldValue.serverTimestamp(),
+                            });
+
+                        // Recargar tabla
+                        await loadHistory();
+                        alert('✅ Caída simulada y guardada en Firebase!');
                     } catch (err) {
                         console.error(err);
-                        alert('⚠️ No se pudo conectar con el servidor Flask.');
+                        alert('⚠️ Error: ' + err.message);
+                    } finally {
+                        simulateBtn.disabled = false;
+                        simulateBtn.textContent = 'Simular caída';
                     }
                 });
+
+                // Auto-recargar cada 30 segundos
+                setInterval(loadHistory, 30000);
             })();
         </script>
     </body>
