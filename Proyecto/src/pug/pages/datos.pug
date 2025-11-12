@@ -202,6 +202,21 @@ append scripts
                     simulateBtn.disabled = true;
                     simulateBtn.textContent = '⏳ Procesando...';
 
+                    // Guardar en Firebase primero con estado "Pendiente"
+                    const docRef = await db.collection('Historial')
+                        .doc('Personas')
+                        .collection(PERSONA)
+                        .add({
+                            hora_caida: firebase.firestore.Timestamp.now(),
+                            tipo: 'Caída simulada',
+                            confianza: 0.95,
+                            ubicacion: 'Simulación web',
+                            aceleracion_max: 3.2,
+                            estado: 'Pendiente',
+                            sensor: 'Simulación manual',
+                            timestamp_servidor: firebase.firestore.FieldValue.serverTimestamp()
+                        });
+
                     // Enviar alerta por WhatsApp
                     const res = await fetch('http://localhost:5000/send-alert', {
                         method: 'POST',
@@ -214,24 +229,29 @@ append scripts
                     });
                     const data = await res.json();
 
-                    // Guardar en Firebase
-                    await db.collection('Historial')
-                        .doc('Personas')
-                        .collection(PERSONA)
-                        .add({
-                            hora_caida: firebase.firestore.Timestamp.now(),
-                            tipo: 'Caída simulada',
-                            confianza: 0.95,
-                            ubicacion: 'Simulación web',
-                            aceleracion_max: 3.2,
-                            estado: data.status === 'ok' ? 'Pendiente' : 'Error al enviar',
-                            sensor: 'Simulación manual',
-                            timestamp_servidor: firebase.firestore.FieldValue.serverTimestamp()
+                    // Actualizar estado a "Enviada" si el mensaje se envió correctamente
+                    if (data.status === 'ok') {
+                        await docRef.update({
+                            estado: 'Enviada',
+                            mensaje_enviado: true,
+                            hora_envio: firebase.firestore.Timestamp.now()
                         });
+                    } else {
+                        await docRef.update({
+                            estado: 'Error al enviar',
+                            mensaje_enviado: false,
+                            error_envio: data.message || 'Error desconocido'
+                        });
+                    }
 
                     // Recargar tabla
                     await loadHistory();
-                    alert('✅ Caída simulada y guardada en Firebase!');
+                    
+                    if (data.status === 'ok') {
+                        alert('✅ Caída registrada y alerta enviada por WhatsApp!');
+                    } else {
+                        alert('⚠️ Caída registrada pero error al enviar WhatsApp: ' + (data.message || 'Error desconocido'));
+                    }
                 } catch (err) {
                     console.error(err);
                     alert('⚠️ Error: ' + err.message);
