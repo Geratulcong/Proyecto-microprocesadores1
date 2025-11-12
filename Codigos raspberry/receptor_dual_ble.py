@@ -93,9 +93,9 @@ async def guardar_datos():
         ])
     
     print(f"\n📝 Guardando datos en: {OUTPUT_FILE}")
-    print("─" * 80)
-    print(f"{'Seq':<6} {'Cadera (ax,ay,az)':<35} {'Pierna (ax,ay,az)':<35}")
-    print("─" * 80)
+    print("─" * 120)
+    print(f"{'Seq':<6} {'Cadera (ax,ay,az | gx,gy,gz)':<55} {'Pierna (ax,ay,az | gx,gy,gz)':<55}")
+    print("─" * 120)
     
     while True:
         contador += 1
@@ -117,8 +117,10 @@ async def guardar_datos():
         # Mostrar cada 10 muestras
         if contador % 10 == 0:
             print(f"{contador:<6} "
-                  f"({datos_cadera['ax']:6.3f},{datos_cadera['ay']:6.3f},{datos_cadera['az']:6.3f})  "
-                  f"({datos_pierna['ax']:6.3f},{datos_pierna['ay']:6.3f},{datos_pierna['az']:6.3f})")
+                  f"({datos_cadera['ax']:6.3f},{datos_cadera['ay']:6.3f},{datos_cadera['az']:6.3f} | "
+                  f"{datos_cadera['gx']:6.3f},{datos_cadera['gy']:6.3f},{datos_cadera['gz']:6.3f})  "
+                  f"({datos_pierna['ax']:6.3f},{datos_pierna['ay']:6.3f},{datos_pierna['az']:6.3f} | "
+                  f"{datos_pierna['gx']:6.3f},{datos_pierna['gy']:6.3f},{datos_pierna['gz']:6.3f})")
         
         await asyncio.sleep(0.05)  # 50ms = 20Hz
 
