@@ -99,6 +99,12 @@ for archivo in archivos:
         
         print(f"   ✅ Cargado: {len(df)} muestras")
         
+        # Escalar giroscopio x4 para darle más peso
+        cols_giro = [c for c in cols if 'gx' in c or 'gy' in c or 'gz' in c]
+        if cols_giro:
+            df[cols_giro] = df[cols_giro] * 4.0
+            print(f"   ⚙️  Giroscopio escalado x4: {cols_giro}")
+        
         # Crear ventanas con solapamiento
         ventanas_creadas = 0
         for i in range(0, len(df) - WINDOW_SIZE + 1, OVERLAP):

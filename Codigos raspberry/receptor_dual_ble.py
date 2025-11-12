@@ -131,11 +131,12 @@ async def detectar_caidas():
         contador += 1
         
         # Combinar datos de ambos sensores (12 features)
+        # Escalar giroscopio x4 (mismo factor usado en entrenamiento)
         muestra = [
             datos_cadera["ax"], datos_cadera["ay"], datos_cadera["az"],
-            datos_cadera["gx"], datos_cadera["gy"], datos_cadera["gz"],
+            datos_cadera["gx"] * 4.0, datos_cadera["gy"] * 4.0, datos_cadera["gz"] * 4.0,
             datos_pierna["ax"], datos_pierna["ay"], datos_pierna["az"],
-            datos_pierna["gx"], datos_pierna["gy"], datos_pierna["gz"]
+            datos_pierna["gx"] * 4.0, datos_pierna["gy"] * 4.0, datos_pierna["gz"] * 4.0
         ]
         
         # Agregar a ventana deslizante
