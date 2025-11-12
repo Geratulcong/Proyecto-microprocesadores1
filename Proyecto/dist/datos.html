@@ -388,6 +388,225 @@
 
                 // Auto-recargar cada 30 segundos
                 setInterval(loadHistory, 30000);
+
+                // 🔔 LISTENER EN TIEMPO REAL - Escuchar nuevas alertas desde Firestore
+                let primeraVez = true;
+                
+                // 📱 Enviar mensaje de WhatsApp
+                async function enviarWhatsAppAlerta(alerta, alertaId) {
+                    const cfg = JSON.parse(localStorage.getItem('apiConfig') || '{}');
+
+                    if (!cfg.phone || !cfg.apiCode) {
+                        console.warn('⚠️ No hay configuración de WhatsApp guardada');
+                        return false;
+                    }
+
+                    try {
+                        const probabilidad = ((alerta.confianza || alerta.probabilidad || 0) * 100).toFixed(1);
+                        const fecha = alerta.hora_caida
+                            ? (alerta.hora_caida.toDate ? alerta.hora_caida.toDate().toLocaleString('es-ES') : new Date().toLocaleString('es-ES'))
+                            : new Date().toLocaleString('es-ES');
+
+                        const mensaje =
+                            `🚨 ALERTA DE CAÍDA DETECTADA\n\n` +
+                            `👤 Persona: Vicente\n` +
+                            `📅 Fecha: ${fecha}\n` +
+                            `🎯 Confianza: ${probabilidad}%\n` +
+                            `🆔 ID: ${alertaId}\n` +
+                            `${alerta.ubicacion ? `📍 Ubicación: ${alerta.ubicacion}\n` : ''}` +
+                            `\nVerifica el estado de la persona inmediatamente.`;
+
+                        console.log('📱 Enviando WhatsApp vía servidor local...');
+                        const res = await fetch('http://localhost:5000/send-alert', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({
+                                phone: cfg.phone,
+                                apiCode: cfg.apiCode,
+                                message: mensaje,
+                            }),
+                        });
+
+                        const data = await res.json().catch(() => ({}));
+                        if (res.ok && data.status === 'ok') {
+                            console.log('✅ WhatsApp enviado correctamente');
+                            return true;
+                        } else {
+                            console.error('❌ Error enviando WhatsApp:', data?.message || res.statusText || 'Error desconocido');
+                            return false;
+                        }
+                    } catch (error) {
+                        console.error('❌ Error al enviar WhatsApp:', error);
+                        return false;
+                    }
+                }
+                
+                function iniciarEscuchadorFirestore() {
+                    console.log('✅ Iniciando listener de Firestore...');
+                    
+                    // Escuchar cambios en tiempo real en la colección
+                    db.collection('Historial')
+                        .doc('Personas')
+                        .collection(PERSONA)
+                        .orderBy('hora_caida', 'desc')
+                        .limit(1)
+                        .onSnapshot((snapshot) => {
+                            snapshot.docChanges().forEach(async (change) => {
+                                // Solo procesar documentos nuevos (no la carga inicial)
+                                if (change.type === 'added' && !primeraVez) {
+                                    const alerta = change.doc.data();
+                                    const alertaId = change.doc.id;
+                                    
+                                    console.log('🚨 Nueva alerta detectada:', alerta);
+                                    
+                                    // Evitar duplicados si ya se envió mensaje
+                                    if (alerta.mensaje_enviado) {
+                                        console.log('ℹ️ Mensaje ya enviado previamente. Se omite.');
+                                        return;
+                                    }
+
+                                    // Notificación visual/sonora y refresco de tabla
+                                    mostrarNotificacionFirestore(alerta, alertaId);
+                                    reproducirSonidoAlerta();
+                                    loadHistory(); // Recargar tabla
+
+                                    // 📱 Enviar WhatsApp automáticamente para toda nueva alerta
+                                    const enviado = await enviarWhatsAppAlerta(alerta, alertaId);
+                                    try {
+                                        if (enviado) {
+                                            await change.doc.ref.update({
+                                                estado: 'Enviada',
+                                                mensaje_enviado: true,
+                                                hora_envio: firebase.firestore.Timestamp.now(),
+                                            });
+                                        } else {
+                                            await change.doc.ref.update({
+                                                estado: 'Error al enviar',
+                                                mensaje_enviado: false,
+                                                error_envio: 'No se pudo enviar WhatsApp automáticamente',
+                                            });
+                                        }
+                                    } catch (e) {
+                                        console.error('❌ Error actualizando documento tras envío:', e);
+                                    }
+                                }
+                            });
+                            
+                            // Después de la primera carga, activar notificaciones
+                            primeraVez = false;
+                        }, (error) => {
+                            console.error('❌ Error en listener:', error);
+                        });
+                    
+                    console.log('✅ Listener activo - esperando alertas...');
+                }
+                
+                // 🔊 Reproducir sonido de alerta
+                function reproducirSonidoAlerta() {
+                    try {
+                        const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+                        
+                        // Primer beep
+                        const osc1 = audioContext.createOscillator();
+                        const gain1 = audioContext.createGain();
+                        osc1.connect(gain1);
+                        gain1.connect(audioContext.destination);
+                        osc1.frequency.value = 800;
+                        osc1.type = 'sine';
+                        gain1.gain.setValueAtTime(0.3, audioContext.currentTime);
+                        gain1.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.5);
+                        osc1.start(audioContext.currentTime);
+                        osc1.stop(audioContext.currentTime + 0.5);
+                        
+                        // Segundo beep
+                        setTimeout(() => {
+                            const osc2 = audioContext.createOscillator();
+                            const gain2 = audioContext.createGain();
+                            osc2.connect(gain2);
+                            gain2.connect(audioContext.destination);
+                            osc2.frequency.value = 1000;
+                            osc2.type = 'sine';
+                            gain2.gain.setValueAtTime(0.3, audioContext.currentTime);
+                            gain2.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.5);
+                            osc2.start(audioContext.currentTime);
+                            osc2.stop(audioContext.currentTime + 0.5);
+                        }, 600);
+                    } catch (e) {
+                        console.log('No se pudo reproducir sonido:', e);
+                    }
+                }
+                
+                // 🔔 Mostrar notificación visual
+                function mostrarNotificacionFirestore(alerta, alertaId) {
+                    const probabilidad = ((alerta.confianza || alerta.probabilidad || 0) * 100).toFixed(1);
+                    const fecha = alerta.hora_caida ? 
+                        (alerta.hora_caida.toDate ? alerta.hora_caida.toDate().toLocaleString('es-ES') : new Date().toLocaleString('es-ES')) :
+                        new Date().toLocaleString('es-ES');
+                    
+                    // Crear notificación
+                    const notif = document.createElement('div');
+                    notif.className = 'alert alert-danger alert-dismissible fade show position-fixed top-0 end-0 m-3';
+                    notif.style.zIndex = '9999';
+                    notif.style.minWidth = '400px';
+                    notif.style.boxShadow = '0 6px 20px rgba(0,0,0,0.4)';
+                    notif.style.animation = 'shake 0.5s';
+                    
+                    notif.innerHTML = `
+                        <h5 class="alert-heading mb-2">
+                            <i class="fas fa-exclamation-triangle"></i> 
+                            ¡CAÍDA DETECTADA!
+                        </h5>
+                        <p class="mb-2">
+                            <strong>Confianza:</strong> <span class="badge bg-danger">${probabilidad}%</span><br>
+                            <strong>Hora:</strong> ${fecha}<br>
+                            <strong>ID:</strong> <code class="small">${alertaId}</code>
+                        </p>
+                        <hr>
+                        <p class="mb-0 small">
+                            ${alerta.cadera_ax !== undefined ? `
+                                <strong>📍 Cadera:</strong> ax=${alerta.cadera_ax?.toFixed(3)}, ay=${alerta.cadera_ay?.toFixed(3)}, az=${alerta.cadera_az?.toFixed(3)}<br>
+                                <strong>📍 Pierna:</strong> ax=${alerta.pierna_ax?.toFixed(3)}, ay=${alerta.pierna_ay?.toFixed(3)}, az=${alerta.pierna_az?.toFixed(3)}
+                            ` : `<em>${alerta.tipo || 'Caída detectada'}</em>`}
+                        </p>
+                        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+                    `;
+                    
+                    document.body.appendChild(notif);
+                    
+                    // Auto-cerrar después de 15 segundos
+                    setTimeout(() => notif.remove(), 15000);
+                    
+                    // Notificación del navegador
+                    if ('Notification' in window && Notification.permission === 'granted') {
+                        new Notification('⚠️ Caída detectada', {
+                            body: `Confianza: ${probabilidad}% - ${fecha}`,
+                            icon: '/favicon.ico',
+                            tag: 'fall-' + alertaId,
+                            requireInteraction: true
+                        });
+                    }
+                }
+                
+                // Agregar CSS para animación shake
+                const styleShake = document.createElement('style');
+                styleShake.textContent = `
+                    @keyframes shake {
+                        0%, 100% { transform: translateX(0); }
+                        10%, 30%, 50%, 70%, 90% { transform: translateX(-10px); }
+                        20%, 40%, 60%, 80% { transform: translateX(10px); }
+                    }
+                `;
+                document.head.appendChild(styleShake);
+                
+                // Solicitar permisos de notificación
+                if ('Notification' in window && Notification.permission === 'default') {
+                    Notification.requestPermission().then(perm => {
+                        console.log('Permiso notificaciones:', perm);
+                    });
+                }
+                
+                // Iniciar listener
+                iniciarEscuchadorFirestore();
             })();
         </script>
     </body>

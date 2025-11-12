@@ -10,7 +10,7 @@ import numpy as np
 import requests
 from pathlib import Path
 from bleak import BleakClient, BleakScanner
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 from tensorflow import keras
 from collections import deque
 import time
@@ -28,8 +28,9 @@ MODEL_PATH = "modelo_caidas_arduino.h5"
 WINDOW_SIZE = 40  # 2 segundos a 20Hz
 UMBRAL_CAIDA = 0.95  # 95% de confianza requerida
 
-# Firebase
-FIREBASE_URL = "https://detector-de-caidas-360-default-rtdb.firebaseio.com/alertas.json"
+# Firebase Firestore (REST API)
+FIREBASE_PROJECT_ID = "detector-de-caidas-360"
+FIRESTORE_URL = f"https://firestore.googleapis.com/v1/projects/{FIREBASE_PROJECT_ID}/databases/(default)/documents/Historial/Personas/Vicente"
 COOLDOWN_ALERTAS = 5.0  # Segundos entre alertas
 
 # --- VARIABLES GLOBALES ---
@@ -44,9 +45,9 @@ modelo = None
 
 print("╔════════════════════════════════════════════════╗")
 print("║   Detector de Caídas - Dual BLE + CNN        ║")
-print("║   + Alertas Firebase                          ║")
+print("║   + Alertas Firestore                         ║")
 print("╚════════════════════════════════════════════════╝")
-print(f"📍 Firebase: {FIREBASE_URL}")
+print(f"📍 Firestore: Historial/Personas/Vicente")
 print(f"⏱️  Cooldown alertas: {COOLDOWN_ALERTAS}s")
 print(f"🎯 Umbral detección: {UMBRAL_CAIDA*100:.0f}%\n")
 
@@ -113,9 +114,9 @@ def handler_pierna(sender, data):
     except Exception as e:
         print(f"⚠️ Error en pierna: {e}")
 
-# --- ENVIAR ALERTA A FIREBASE ---
-def enviar_a_firebase(probabilidad, datos_cadera, datos_pierna):
-    """Envía alerta de caída a Firebase"""
+# --- ENVIAR ALERTA A FIRESTORE ---
+def enviar_a_firestore(probabilidad, datos_cadera, datos_pierna):
+    """Envía alerta de caída a Firestore (Historial/Personas/Vicente)"""
     global ultima_alerta
     
     # Verificar cooldown de 5 segundos
@@ -126,42 +127,64 @@ def enviar_a_firebase(probabilidad, datos_cadera, datos_pierna):
         return False
     
     try:
-        # Preparar datos de la alerta
-        alerta = {
-            "timestamp": datetime.now().isoformat(),
-            "probabilidad": float(probabilidad),
-            "sensor_cadera": {
-                "ax": datos_cadera["ax"],
-                "ay": datos_cadera["ay"],
-                "az": datos_cadera["az"],
-                "gx": datos_cadera["gx"],
-                "gy": datos_cadera["gy"],
-                "gz": datos_cadera["gz"]
-            },
-            "sensor_pierna": {
-                "ax": datos_pierna["ax"],
-                "ay": datos_pierna["ay"],
-                "az": datos_pierna["az"],
-                "gx": datos_pierna["gx"],
-                "gy": datos_pierna["gy"],
-                "gz": datos_pierna["gz"]
+        # Timestamp en formato Firestore - Hora de Chile (UTC-3) convertida a UTC
+        chile_tz = timezone(timedelta(hours=-3))
+        ahora_chile = datetime.now(chile_tz)
+        
+        # Convertir a UTC para Firestore
+        ahora_utc = ahora_chile.astimezone(timezone.utc)
+        epoch_seconds = int(ahora_utc.timestamp())
+        epoch_nanos = int((ahora_utc.timestamp() - epoch_seconds) * 1e9)
+        
+        timestamp_firestore = {
+            "timestampValue": f"{ahora_utc.strftime('%Y-%m-%dT%H:%M:%S')}.{epoch_nanos:09d}Z"
+        }
+        
+        # Preparar documento en formato Firestore REST API
+        documento = {
+            "fields": {
+                "hora_caida": timestamp_firestore,
+                "tipo": {"stringValue": "Caída detectada - Sistema dual"},
+                "confianza": {"doubleValue": float(probabilidad)},
+                "ubicacion": {"stringValue": "Detectado por sensores"},
+                "estado": {"stringValue": "Pendiente"},
+                "sensor": {"stringValue": "Dual (Cadera + Pierna)"},
+                "probabilidad": {"doubleValue": float(probabilidad)},
+                # Datos sensor cadera
+                "cadera_ax": {"doubleValue": float(datos_cadera["ax"])},
+                "cadera_ay": {"doubleValue": float(datos_cadera["ay"])},
+                "cadera_az": {"doubleValue": float(datos_cadera["az"])},
+                "cadera_gx": {"doubleValue": float(datos_cadera["gx"])},
+                "cadera_gy": {"doubleValue": float(datos_cadera["gy"])},
+                "cadera_gz": {"doubleValue": float(datos_cadera["gz"])},
+                # Datos sensor pierna
+                "pierna_ax": {"doubleValue": float(datos_pierna["ax"])},
+                "pierna_ay": {"doubleValue": float(datos_pierna["ay"])},
+                "pierna_az": {"doubleValue": float(datos_pierna["az"])},
+                "pierna_gx": {"doubleValue": float(datos_pierna["gx"])},
+                "pierna_gy": {"doubleValue": float(datos_pierna["gy"])},
+                "pierna_gz": {"doubleValue": float(datos_pierna["gz"])},
             }
         }
         
-        # Enviar a Firebase
-        response = requests.post(FIREBASE_URL, json=alerta, timeout=5)
+        # Enviar a Firestore REST API
+        response = requests.post(FIRESTORE_URL, json=documento, timeout=5)
         
         if response.status_code == 200:
             ultima_alerta = tiempo_actual
-            print(f"   ✅ Alerta enviada a Firebase")
-            print(f"   🔗 ID: {response.json().get('name', 'N/A')}")
+            doc_data = response.json()
+            doc_id = doc_data.get('name', '').split('/')[-1]
+            print(f"   ✅ Alerta enviada a Firestore")
+            print(f"   🔗 ID: {doc_id}")
+            print(f"   📍 Ruta: Historial/Personas/Vicente/{doc_id}")
             return True
         else:
-            print(f"   ❌ Error Firebase: {response.status_code}")
+            print(f"   ❌ Error Firestore: {response.status_code}")
+            print(f"   Respuesta: {response.text[:200]}")
             return False
             
     except requests.exceptions.Timeout:
-        print(f"   ⏱️ Timeout al conectar con Firebase")
+        print(f"   ⏱️ Timeout al conectar con Firestore")
         return False
     except Exception as e:
         print(f"   ❌ Error enviando a Firebase: {e}")
@@ -216,8 +239,8 @@ async def detectar_caidas():
             if prob_caida is not None:
                 if prob_caida > UMBRAL_CAIDA:
                     estado = f"🔴 CAÍDA ({prob_caida*100:.1f}%)"
-                    # Enviar a Firebase con cooldown de 5 segundos
-                    enviar_a_firebase(prob_caida, datos_cadera, datos_pierna)
+                    # Enviar a Firestore con cooldown de 5 segundos
+                    enviar_a_firestore(prob_caida, datos_cadera, datos_pierna)
                 else:
                     estado = f"✅ OK ({prob_caida*100:.1f}%)"
             
