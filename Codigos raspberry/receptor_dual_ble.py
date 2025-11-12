@@ -1,6 +1,7 @@
 """
 Cliente BLE para conectar DOS Arduinos Nano 33 BLE Sense
 Recibe datos de cadera y pierna simultáneamente
+Usa modelo CNN para detectar caídas en tiempo real
 """
 import asyncio
 import json
@@ -9,6 +10,8 @@ from pathlib import Path
 from bleak import BleakClient, BleakScanner
 from datetime import datetime
 import csv
+from tensorflow import keras
+from collections import deque
 
 # --- CONFIGURACIÓN ---
 DEVICE_CADERA = "Sensor-Cadera"
@@ -18,6 +21,11 @@ DEVICE_PIERNA = "Sensor-Pierna"
 CHAR_CADERA = "19b10001-0000-1000-8000-00805f9b34fb"
 CHAR_PIERNA = "19b20001-0000-1000-8000-00805f9b34fb"
 
+# Modelo y ventana de detección
+MODEL_PATH = "modelo_caidas_arduino.h5"
+WINDOW_SIZE = 40  # 2 segundos a 20Hz
+UMBRAL_CAIDA = 0.5
+
 # Archivo de salida
 OUTPUT_FILE = "datos_dos_sensores.csv"
 
@@ -26,9 +34,27 @@ datos_cadera = {"ax": 0, "ay": 0, "az": 0, "gx": 0, "gy": 0, "gz": 0}
 datos_pierna = {"ax": 0, "ay": 0, "az": 0, "gx": 0, "gy": 0, "gz": 0}
 contador = 0
 
+# Buffer circular para ventana deslizante
+ventana = deque(maxlen=WINDOW_SIZE)
+modelo = None
+
 print("╔════════════════════════════════════════════════╗")
-print("║   Receptor Dual BLE - Cadera + Pierna        ║")
+print("║   Detector de Caídas - Dual BLE + CNN        ║")
 print("╚════════════════════════════════════════════════╝\n")
+
+# --- CARGAR MODELO ---
+def cargar_modelo():
+    """Carga el modelo CNN entrenado"""
+    global modelo
+    try:
+        modelo = keras.models.load_model(MODEL_PATH)
+        num_features = modelo.input_shape[2]
+        print(f"✅ Modelo cargado: {MODEL_PATH}")
+        print(f"   📊 Entrada: (batch, {WINDOW_SIZE}, {num_features})")
+        return num_features
+    except Exception as e:
+        print(f"❌ Error cargando modelo: {e}")
+        exit(1)
 
 # --- BUSCAR DISPOSITIVOS ---
 async def find_devices():
@@ -79,10 +105,26 @@ def handler_pierna(sender, data):
     except Exception as e:
         print(f"⚠️ Error en pierna: {e}")
 
-# --- GUARDAR DATOS ---
+# --- PREDECIR CAÍDA ---
+def predecir_caida():
+    """Usa el modelo CNN para predecir si hay caída"""
+    global ventana, modelo
+    
+    if len(ventana) < WINDOW_SIZE:
+        return None  # No hay suficientes datos aún
+    
+    # Convertir ventana a numpy array
+    X = np.array(list(ventana))  # Shape: (40, 12)
+    X = X.reshape(1, WINDOW_SIZE, -1)  # Shape: (1, 40, 12)
+    
+    # Predecir
+    pred = modelo.predict(X, verbose=0)[0][0]
+    return pred
+
+# --- GUARDAR DATOS Y DETECTAR ---
 async def guardar_datos():
-    """Guarda los datos combinados cada 50ms (20Hz)"""
-    global contador
+    """Guarda los datos combinados cada 50ms (20Hz) y detecta caídas"""
+    global contador, ventana
     
     # Crear archivo CSV si no existe
     with open(OUTPUT_FILE, 'w', newline='') as f:
@@ -94,33 +136,45 @@ async def guardar_datos():
     
     print(f"\n📝 Guardando datos en: {OUTPUT_FILE}")
     print("─" * 120)
-    print(f"{'Seq':<6} {'Cadera (ax,ay,az | gx,gy,gz)':<55} {'Pierna (ax,ay,az | gx,gy,gz)':<55}")
+    print(f"{'Seq':<6} {'Cadera (ax,ay,az | gx,gy,gz)':<55} {'Pierna (ax,ay,az | gx,gy,gz)':<40} {'Estado':<15}")
     print("─" * 120)
     
     while True:
         contador += 1
         
-        # Combinar datos de ambos sensores
-        fila = [
-            contador,
+        # Combinar datos de ambos sensores (12 features)
+        muestra = [
             datos_cadera["ax"], datos_cadera["ay"], datos_cadera["az"],
             datos_cadera["gx"], datos_cadera["gy"], datos_cadera["gz"],
             datos_pierna["ax"], datos_pierna["ay"], datos_pierna["az"],
             datos_pierna["gx"], datos_pierna["gy"], datos_pierna["gz"]
         ]
         
+        # Agregar a ventana deslizante
+        ventana.append(muestra)
+        
         # Guardar en CSV
+        fila = [contador] + muestra
         with open(OUTPUT_FILE, 'a', newline='') as f:
             writer = csv.writer(f)
             writer.writerow(fila)
         
-        # Mostrar cada 10 muestras
-        if contador % 10 == 0:
+        # Predecir cada 5 muestras
+        estado = "⚪ Normal"
+        if contador % 5 == 0:
+            prob_caida = predecir_caida()
+            
+            if prob_caida is not None:
+                if prob_caida > UMBRAL_CAIDA:
+                    estado = f"🔴 CAÍDA ({prob_caida*100:.1f}%)"
+                else:
+                    estado = f"✅ OK ({prob_caida*100:.1f}%)"
+            
             print(f"{contador:<6} "
                   f"({datos_cadera['ax']:6.3f},{datos_cadera['ay']:6.3f},{datos_cadera['az']:6.3f} | "
                   f"{datos_cadera['gx']:6.3f},{datos_cadera['gy']:6.3f},{datos_cadera['gz']:6.3f})  "
                   f"({datos_pierna['ax']:6.3f},{datos_pierna['ay']:6.3f},{datos_pierna['az']:6.3f} | "
-                  f"{datos_pierna['gx']:6.3f},{datos_pierna['gy']:6.3f},{datos_pierna['gz']:6.3f})")
+                  f"{datos_pierna['gx']:6.3f},{datos_pierna['gy']:6.3f},{datos_pierna['gz']:6.3f})  {estado}")
         
         await asyncio.sleep(0.05)  # 50ms = 20Hz
 
@@ -174,6 +228,13 @@ async def main_loop():
 
 # --- EJECUTAR ---
 if __name__ == "__main__":
+    # Cargar modelo primero
+    num_features = cargar_modelo()
+    
+    if num_features != 12:
+        print(f"⚠️ ADVERTENCIA: El modelo espera {num_features} features, pero enviamos 12")
+        print(f"   Entrena el modelo con datos de 12 columnas (cadera + pierna)")
+    
     try:
         asyncio.run(main_loop())
     except KeyboardInterrupt:
