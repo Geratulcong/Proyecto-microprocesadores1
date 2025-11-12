@@ -2,7 +2,6 @@
 *.csv
 
 # Modelos entrenados
-*.h5
 *.save
 *.pkl
 
