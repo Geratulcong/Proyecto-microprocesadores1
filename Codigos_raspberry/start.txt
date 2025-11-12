@@ -1,0 +1,18 @@
+#!/bin/sh -e
+#
+# rc.local
+#
+# Este script se ejecuta al final de cada nivel de ejecución multiusuario.
+# Asegúrate de que termine con "exit 0" en caso de éxito.
+
+# Mostrar la IP local
+_IP=$(hostname -I) || true
+if [ "$_IP" ]; then
+  printf "My IP address is %s\n" "$_IP"
+fi
+
+# Ejecutar detector de caídas
+cd Desktop/Proyecto-microprocesadores1/Codigos_raspberry
+python3 receptor_dual_ble.py
+
+exit 0
