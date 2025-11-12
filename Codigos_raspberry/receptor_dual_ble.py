@@ -2,15 +2,18 @@
 Cliente BLE para conectar DOS Arduinos Nano 33 BLE Sense
 Recibe datos de cadera y pierna simultáneamente
 Usa modelo CNN para detectar caídas en tiempo real
+Envía alertas a Firebase cuando detecta caída
 """
 import asyncio
 import json
 import numpy as np
+import requests
 from pathlib import Path
 from bleak import BleakClient, BleakScanner
 from datetime import datetime
 from tensorflow import keras
 from collections import deque
+import time
 
 # --- CONFIGURACIÓN ---
 DEVICE_CADERA = "Sensor-Cadera"
@@ -23,12 +26,17 @@ CHAR_PIERNA = "19b20001-0000-1000-8000-00805f9b34fb"
 # Modelo y ventana de detección
 MODEL_PATH = "modelo_caidas_arduino.h5"
 WINDOW_SIZE = 40  # 2 segundos a 20Hz
-UMBRAL_CAIDA = 0.5
+UMBRAL_CAIDA = 0.95  # 95% de confianza requerida
+
+# Firebase
+FIREBASE_URL = "https://detector-de-caidas-360-default-rtdb.firebaseio.com/alertas.json"
+COOLDOWN_ALERTAS = 5.0  # Segundos entre alertas
 
 # --- VARIABLES GLOBALES ---
 datos_cadera = {"ax": 0, "ay": 0, "az": 0, "gx": 0, "gy": 0, "gz": 0}
 datos_pierna = {"ax": 0, "ay": 0, "az": 0, "gx": 0, "gy": 0, "gz": 0}
 contador = 0
+ultima_alerta = 0  # Timestamp de la última alerta enviada
 
 # Buffer circular para ventana deslizante
 ventana = deque(maxlen=WINDOW_SIZE)
@@ -36,7 +44,11 @@ modelo = None
 
 print("╔════════════════════════════════════════════════╗")
 print("║   Detector de Caídas - Dual BLE + CNN        ║")
-print("╚════════════════════════════════════════════════╝\n")
+print("║   + Alertas Firebase                          ║")
+print("╚════════════════════════════════════════════════╝")
+print(f"📍 Firebase: {FIREBASE_URL}")
+print(f"⏱️  Cooldown alertas: {COOLDOWN_ALERTAS}s")
+print(f"🎯 Umbral detección: {UMBRAL_CAIDA*100:.0f}%\n")
 
 # --- CARGAR MODELO ---
 def cargar_modelo():
@@ -101,6 +113,60 @@ def handler_pierna(sender, data):
     except Exception as e:
         print(f"⚠️ Error en pierna: {e}")
 
+# --- ENVIAR ALERTA A FIREBASE ---
+def enviar_a_firebase(probabilidad, datos_cadera, datos_pierna):
+    """Envía alerta de caída a Firebase"""
+    global ultima_alerta
+    
+    # Verificar cooldown de 5 segundos
+    tiempo_actual = time.time()
+    if tiempo_actual - ultima_alerta < COOLDOWN_ALERTAS:
+        tiempo_restante = COOLDOWN_ALERTAS - (tiempo_actual - ultima_alerta)
+        print(f"   ⏳ Cooldown activo - {tiempo_restante:.1f}s restantes")
+        return False
+    
+    try:
+        # Preparar datos de la alerta
+        alerta = {
+            "timestamp": datetime.now().isoformat(),
+            "probabilidad": float(probabilidad),
+            "sensor_cadera": {
+                "ax": datos_cadera["ax"],
+                "ay": datos_cadera["ay"],
+                "az": datos_cadera["az"],
+                "gx": datos_cadera["gx"],
+                "gy": datos_cadera["gy"],
+                "gz": datos_cadera["gz"]
+            },
+            "sensor_pierna": {
+                "ax": datos_pierna["ax"],
+                "ay": datos_pierna["ay"],
+                "az": datos_pierna["az"],
+                "gx": datos_pierna["gx"],
+                "gy": datos_pierna["gy"],
+                "gz": datos_pierna["gz"]
+            }
+        }
+        
+        # Enviar a Firebase
+        response = requests.post(FIREBASE_URL, json=alerta, timeout=5)
+        
+        if response.status_code == 200:
+            ultima_alerta = tiempo_actual
+            print(f"   ✅ Alerta enviada a Firebase")
+            print(f"   🔗 ID: {response.json().get('name', 'N/A')}")
+            return True
+        else:
+            print(f"   ❌ Error Firebase: {response.status_code}")
+            return False
+            
+    except requests.exceptions.Timeout:
+        print(f"   ⏱️ Timeout al conectar con Firebase")
+        return False
+    except Exception as e:
+        print(f"   ❌ Error enviando a Firebase: {e}")
+        return False
+
 # --- PREDECIR CAÍDA ---
 def predecir_caida():
     """Usa el modelo CNN para predecir si hay caída"""
@@ -150,6 +216,8 @@ async def detectar_caidas():
             if prob_caida is not None:
                 if prob_caida > UMBRAL_CAIDA:
                     estado = f"🔴 CAÍDA ({prob_caida*100:.1f}%)"
+                    # Enviar a Firebase con cooldown de 5 segundos
+                    enviar_a_firebase(prob_caida, datos_cadera, datos_pierna)
                 else:
                     estado = f"✅ OK ({prob_caida*100:.1f}%)"
             
