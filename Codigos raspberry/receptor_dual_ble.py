@@ -9,7 +9,6 @@ import numpy as np
 from pathlib import Path
 from bleak import BleakClient, BleakScanner
 from datetime import datetime
-import csv
 from tensorflow import keras
 from collections import deque
 
@@ -25,9 +24,6 @@ CHAR_PIERNA = "19b20001-0000-1000-8000-00805f9b34fb"
 MODEL_PATH = "modelo_caidas_arduino.h5"
 WINDOW_SIZE = 40  # 2 segundos a 20Hz
 UMBRAL_CAIDA = 0.5
-
-# Archivo de salida
-OUTPUT_FILE = "datos_dos_sensores.csv"
 
 # --- VARIABLES GLOBALES ---
 datos_cadera = {"ax": 0, "ay": 0, "az": 0, "gx": 0, "gy": 0, "gz": 0}
@@ -121,20 +117,12 @@ def predecir_caida():
     pred = modelo.predict(X, verbose=0)[0][0]
     return pred
 
-# --- GUARDAR DATOS Y DETECTAR ---
-async def guardar_datos():
-    """Guarda los datos combinados cada 50ms (20Hz) y detecta caídas"""
+# --- DETECTAR CAÍDAS EN TIEMPO REAL ---
+async def detectar_caidas():
+    """Detecta caídas en tiempo real sin guardar CSV"""
     global contador, ventana
     
-    # Crear archivo CSV si no existe
-    with open(OUTPUT_FILE, 'w', newline='') as f:
-        writer = csv.writer(f)
-        writer.writerow([
-            'seq', 'cadera_ax', 'cadera_ay', 'cadera_az', 'cadera_gx', 'cadera_gy', 'cadera_gz',
-            'pierna_ax', 'pierna_ay', 'pierna_az', 'pierna_gx', 'pierna_gy', 'pierna_gz'
-        ])
-    
-    print(f"\n📝 Guardando datos en: {OUTPUT_FILE}")
+    print("\n📡 Iniciando detección en tiempo real...")
     print("─" * 120)
     print(f"{'Seq':<6} {'Cadera (ax,ay,az | gx,gy,gz)':<55} {'Pierna (ax,ay,az | gx,gy,gz)':<40} {'Estado':<15}")
     print("─" * 120)
@@ -152,12 +140,6 @@ async def guardar_datos():
         
         # Agregar a ventana deslizante
         ventana.append(muestra)
-        
-        # Guardar en CSV
-        fila = [contador] + muestra
-        with open(OUTPUT_FILE, 'a', newline='') as f:
-            writer = csv.writer(f)
-            writer.writerow(fila)
         
         # Predecir cada 5 muestras
         estado = "⚪ Normal"
@@ -197,15 +179,15 @@ async def conectar_dispositivos():
         
         print("\n📡 Recibiendo datos de ambos sensores...")
         
-        # Iniciar guardado de datos
-        tarea_guardado = asyncio.create_task(guardar_datos())
+        # Iniciar detección de caídas
+        tarea_deteccion = asyncio.create_task(detectar_caidas())
         
         try:
             # Mantener conexión activa
             while True:
                 await asyncio.sleep(1)
         except asyncio.CancelledError:
-            tarea_guardado.cancel()
+            tarea_deteccion.cancel()
             await client_cadera.stop_notify(CHAR_CADERA)
             await client_pierna.stop_notify(CHAR_PIERNA)
             raise
@@ -239,4 +221,3 @@ if __name__ == "__main__":
         asyncio.run(main_loop())
     except KeyboardInterrupt:
         print("\n👋 Programa finalizado")
-        print(f"📊 Datos guardados en: {OUTPUT_FILE}")
