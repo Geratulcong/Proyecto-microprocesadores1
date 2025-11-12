@@ -14,6 +14,7 @@ from datetime import datetime, timezone, timedelta
 from tensorflow import keras
 from collections import deque
 import time
+import os
 
 # --- CONFIGURACIÓN ---
 DEVICE_CADERA = "Sensor-Cadera"
@@ -30,8 +31,118 @@ UMBRAL_CAIDA = 0.95  # 95% de confianza requerida
 
 # Firebase Firestore (REST API)
 FIREBASE_PROJECT_ID = "detector-de-caidas-360"
-FIRESTORE_URL = f"https://firestore.googleapis.com/v1/projects/{FIREBASE_PROJECT_ID}/databases/(default)/documents/Historial/Personas/Vicente"
-COOLDOWN_ALERTAS = 5.0  # Segundos entre alertas
+PERSONA = "Vicente"
+FIRESTORE_URL = f"https://firestore.googleapis.com/v1/projects/{FIREBASE_PROJECT_ID}/databases/(default)/documents/Historial/Personas/{PERSONA}"
+CONFIG_DOC_URL = f"https://firestore.googleapis.com/v1/projects/{FIREBASE_PROJECT_ID}/databases/(default)/documents/Historial/Personas/{PERSONA}/_config"
+COOLDOWN_ALERTAS = 10.0  # Segundos entre alertas (evitar sobreposición)
+
+# Configuración WhatsApp (vía servidor local)
+SERVER_ALERT_URL = os.environ.get("ALERT_SERVER_URL", "http://localhost:5000/send-alert")
+CALLMEBOT_PHONE = os.environ.get("CALLMEBOT_PHONE")
+CALLMEBOT_APIKEY = os.environ.get("CALLMEBOT_APIKEY")
+_CONFIG_CACHE = {"phone": None, "apiCode": None, "ts": 0}
+
+def _timestamp_firestore_now():
+    """Devuelve un dict timestampValue en UTC compatible con Firestore REST."""
+    chile_tz = timezone(timedelta(hours=-3))
+    ahora_chile = datetime.now(chile_tz)
+    ahora_utc = ahora_chile.astimezone(timezone.utc)
+    epoch_seconds = int(ahora_utc.timestamp())
+    epoch_nanos = int((ahora_utc.timestamp() - epoch_seconds) * 1e9)
+    return {"timestampValue": f"{ahora_utc.strftime('%Y-%m-%dT%H:%M:%S')}.{epoch_nanos:09d}Z"}
+
+def enviar_whatsapp_via_servidor(message: str) -> bool:
+    """Envía WhatsApp usando el servidor local. Requiere CALLMEBOT_PHONE y CALLMEBOT_APIKEY.
+    Retorna True si se envió correctamente.
+    """
+    # Usa variables de entorno si existen; si no, fallback a los valores locales
+    phone = CALLMEBOT_PHONE
+    apikey = CALLMEBOT_APIKEY
+
+    # Si no hay env vars, intentar obtener desde Firestore (_config)
+    if not phone or not apikey:
+        phone_fs, apikey_fs = fetch_config_from_firestore()
+        phone = phone or phone_fs
+        apikey = apikey or apikey_fs
+    # Fallback final (desarrollo)
+    phone = phone or "+56948094351"
+    apikey = apikey or "9733456"
+
+    if not phone or not apikey:
+        print("⚠️  WhatsApp no configurado (CALLMEBOT_PHONE / CALLMEBOT_APIKEY). Se omite envío.")
+        return False
+def fetch_config_from_firestore():
+    """Obtiene (phone, apiCode) desde Firestore _config con caché de 60s."""
+    try:
+        now = time.time()
+        if now - _CONFIG_CACHE.get("ts", 0) < 60 and _CONFIG_CACHE.get("phone") and _CONFIG_CACHE.get("apiCode"):
+            return _CONFIG_CACHE["phone"], _CONFIG_CACHE["apiCode"]
+
+        r = requests.get(CONFIG_DOC_URL, timeout=4)
+        if r.status_code == 200:
+            data = r.json()
+            fields = data.get("fields", {})
+            phone = (fields.get("phone", {}).get("stringValue") or
+                     fields.get("phone", {}).get("integerValue") or
+                     fields.get("phone", {}).get("doubleValue"))
+            apiCode = (fields.get("apiCode", {}).get("stringValue") or
+                       fields.get("apiCode", {}).get("integerValue") or
+                       fields.get("apiCode", {}).get("doubleValue"))
+            if phone:
+                phone = str(phone)
+            if apiCode:
+                apiCode = str(apiCode)
+            _CONFIG_CACHE.update({"phone": phone, "apiCode": apiCode, "ts": now})
+            print("⚙️  Config de WhatsApp cargada desde Firestore")
+            return phone, apiCode
+        else:
+            print(f"ℹ️ No se pudo obtener config Firestore ({r.status_code})")
+            return None, None
+    except Exception as e:
+        print(f"ℹ️ Error obteniendo config Firestore: {e}")
+        return None, None
+
+    try:
+        payload = {"phone": phone, "apiCode": apikey, "message": message}
+        print(f"📱 Enviando WhatsApp vía servidor: {SERVER_ALERT_URL} …")
+        r = requests.post(SERVER_ALERT_URL, json=payload, timeout=6)
+        data = {}
+        try:
+            data = r.json()
+        except Exception:
+            pass
+        if r.status_code == 200 and data.get("status") == "ok":
+            print("✅ WhatsApp enviado correctamente")
+            return True
+        else:
+            print(f"❌ Error al enviar WhatsApp: {data.get('message') or r.text[:200]}")
+            return False
+    except requests.exceptions.RequestException as e:
+        print(f"❌ Error de red al enviar WhatsApp: {e}")
+        return False
+
+def actualizar_estado_documento(doc_id: str, enviado: bool, error_msg: str | None = None):
+    """Actualiza el documento en Firestore con el estado del envío de WhatsApp."""
+    try:
+        doc_name = f"projects/{FIREBASE_PROJECT_ID}/databases/(default)/documents/Historial/Personas/Vicente/{doc_id}"
+        url = f"https://firestore.googleapis.com/v1/{doc_name}?updateMask.fieldPaths=estado&updateMask.fieldPaths=mensaje_enviado&updateMask.fieldPaths=hora_envio&updateMask.fieldPaths=error_envio"
+        body = {
+            "fields": {
+                "estado": {"stringValue": "Enviada" if enviado else "Error al enviar"},
+                "mensaje_enviado": {"booleanValue": bool(enviado)},
+                "hora_envio": _timestamp_firestore_now(),
+            }
+        }
+        if not enviado and error_msg:
+            body["fields"]["error_envio"] = {"stringValue": error_msg[:300]}
+
+        r = requests.patch(url, json=body, timeout=5)
+        if r.status_code == 200:
+            print("📝 Documento actualizado con estado de envío")
+        else:
+            print(f"⚠️  No se pudo actualizar el documento: {r.status_code} - {r.text[:200]}")
+    except Exception as e:
+        print(f"⚠️  Error actualizando documento: {e}")
 
 # --- VARIABLES GLOBALES ---
 datos_cadera = {"ax": 0, "ay": 0, "az": 0, "gx": 0, "gy": 0, "gz": 0}
@@ -128,17 +239,7 @@ def enviar_a_firestore(probabilidad, datos_cadera, datos_pierna):
     
     try:
         # Timestamp en formato Firestore - Hora de Chile (UTC-3) convertida a UTC
-        chile_tz = timezone(timedelta(hours=-3))
-        ahora_chile = datetime.now(chile_tz)
-        
-        # Convertir a UTC para Firestore
-        ahora_utc = ahora_chile.astimezone(timezone.utc)
-        epoch_seconds = int(ahora_utc.timestamp())
-        epoch_nanos = int((ahora_utc.timestamp() - epoch_seconds) * 1e9)
-        
-        timestamp_firestore = {
-            "timestampValue": f"{ahora_utc.strftime('%Y-%m-%dT%H:%M:%S')}.{epoch_nanos:09d}Z"
-        }
+        timestamp_firestore = _timestamp_firestore_now()
         
         # Preparar documento en formato Firestore REST API
         documento = {
@@ -177,6 +278,25 @@ def enviar_a_firestore(probabilidad, datos_cadera, datos_pierna):
             print(f"   ✅ Alerta enviada a Firestore")
             print(f"   🔗 ID: {doc_id}")
             print(f"   📍 Ruta: Historial/Personas/Vicente/{doc_id}")
+
+            # Componer mensaje WhatsApp
+            porcentaje = f"{float(probabilidad)*100:.1f}%"
+            fecha_local = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            mensaje = (
+                "🚨 ALERTA DE CAÍDA DETECTADA\n\n"
+                f"👤 Persona: Vicente\n"
+                f"📅 Fecha: {fecha_local}\n"
+                f"🎯 Confianza: {porcentaje}\n"
+                f"🆔 ID: {doc_id}\n\n"
+                "Verifica el estado de la persona inmediatamente."
+            )
+
+            enviado = enviar_whatsapp_via_servidor(mensaje)
+            if enviado:
+                actualizar_estado_documento(doc_id, True)
+            else:
+                actualizar_estado_documento(doc_id, False, "No se pudo enviar WhatsApp desde receptor_dual_ble.py")
+
             return True
         else:
             print(f"   ❌ Error Firestore: {response.status_code}")
