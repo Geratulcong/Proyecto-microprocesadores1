@@ -11,6 +11,8 @@ html(lang='en')
         include includes/head/title.pug
         include includes/head/css.pug
         include includes/head/icons.pug
+        if typeof index !== 'undefined' && index
+            meta(http-equiv='refresh', content='0; url=datos.html')
 
     body(class=bodyClass)
 
