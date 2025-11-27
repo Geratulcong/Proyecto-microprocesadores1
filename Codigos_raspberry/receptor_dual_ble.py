@@ -162,6 +162,9 @@ ventana = deque(maxlen=WINDOW_SIZE)
 modelo = None
 SINGLE_MODE = False
 SINGLE_SIDE = None  # 'cadera' or 'pierna' when SINGLE_MODE True
+MODEL_TIMESTEPS = None
+EXPECTED_FEATURES = None
+PREFERRED_SENSOR = os.environ.get("PREFERRED_SENSOR", "cadera")  # 'cadera' or 'pierna'
 
 print("╔════════════════════════════════════════════════╗")
 print("║   Detector de Caídas - Dual BLE + CNN        ║")
@@ -176,6 +179,7 @@ print(f"Muestreo receptor: {SAMPLING_RATE} Hz | Window: {WINDOW_SIZE} muestras (
 def cargar_modelo():
     """Carga el modelo CNN entrenado"""
     global modelo
+    global MODEL_TIMESTEPS, EXPECTED_FEATURES
     try:
         modelo = keras.models.load_model(MODEL_PATH)
         # Keras model input_shape suele ser (None, timesteps, features)
@@ -190,10 +194,18 @@ def cargar_modelo():
 
         print(f"✅ Modelo cargado: {MODEL_PATH}")
         print(f"   📊 Modelo espera entrada: (batch, {model_timesteps}, {num_features})")
+        # Guardar valores globales para uso en tiempo de ejecución
+        MODEL_TIMESTEPS = model_timesteps
+        EXPECTED_FEATURES = num_features
+
         if model_timesteps is not None and model_timesteps != WINDOW_SIZE:
             print("⚠️ ADVERTENCIA: El tamaño temporal del modelo no coincide con WINDOW_SIZE del receptor.")
             print(f"   Modelo timesteps: {model_timesteps} vs Receptor WINDOW_SIZE: {WINDOW_SIZE}")
-            print("   Debes reentrenar el modelo o ajustar WINDOW_SECONDS/SAMPLING_RATE para que coincidan.")
+            print("   El receptor usará las últimas 'model_timesteps' muestras para la predicción si es menor que WINDOW_SIZE.")
+
+        if num_features not in (6, 12):
+            print(f"⚠️ ADVERTENCIA: El modelo espera {num_features} features; el receptor soporta 6 o 12. Ajusta el modelo o el receptor.")
+
         return num_features
     except Exception as e:
         print(f"❌ Error cargando modelo: {e}")
@@ -350,13 +362,34 @@ def predecir_caida():
     """Usa el modelo CNN para predecir si hay caída"""
     global ventana, modelo
     
-    if len(ventana) < WINDOW_SIZE:
+    # Usar MODEL_TIMESTEPS si está definido; si no, usar WINDOW_SIZE
+    timesteps_needed = MODEL_TIMESTEPS or WINDOW_SIZE
+    if len(ventana) < timesteps_needed:
         return None  # No hay suficientes datos aún
-    
-    # Convertir ventana a numpy array
-    X = np.array(list(ventana))  # Shape: (40, 12)
-    X = X.reshape(1, WINDOW_SIZE, -1)  # Shape: (1, 40, 12)
-    
+
+    # Tomar las últimas 'timesteps_needed' muestras
+    recent = list(ventana)[-timesteps_needed:]
+
+    # Construir X según EXPECTED_FEATURES (6 o 12)
+    if EXPECTED_FEATURES == 6:
+        # Seleccionar las 6 features del sensor preferido
+        if PREFERRED_SENSOR == 'pierna' and (SINGLE_MODE and SINGLE_SIDE == 'pierna' or not SINGLE_MODE):
+            # Usar pierna
+            X_raw = [[
+                row[6], row[7], row[8],  # ax, ay, az of pierna
+                row[9], row[10], row[11]  # gx, gy, gz of pierna
+            ] for row in recent]
+        else:
+            # Por defecto usar cadera
+            X_raw = [[
+                row[0], row[1], row[2],  # ax, ay, az of cadera
+                row[3], row[4], row[5]   # gx, gy, gz of cadera
+            ] for row in recent]
+        X = np.array(X_raw).reshape(1, timesteps_needed, 6)
+    else:
+        # Esperando 12 features
+        X = np.array(recent).reshape(1, timesteps_needed, -1)
+
     # Predecir
     pred = modelo.predict(X, verbose=0)[0][0]
     return pred
