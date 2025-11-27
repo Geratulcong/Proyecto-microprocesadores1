@@ -1,9 +1,3 @@
-# Archivos de datos procesados (muy grandes para GitHub)
-*.csv
-
-# Modelos entrenados
-*.save
-*.pkl
 
 # Cache de Python
 __pycache__/
