@@ -2,16 +2,32 @@ import asyncio
 import struct
 from datetime import datetime
 from bleak import BleakClient, BleakScanner
+import numpy as np
+from tensorflow import keras
+from collections import deque
+import os
 
 # Configuración: pon MAC si la conoces, si no deja string vacío para buscar por nombre
 CADERA_MAC = "FA:04:1B:E0:65:B1"  # opcional, poner "" para discovery por nombre
 DEVICE_NAME = "NanoSense33-Cadera"
 CHARACTERISTIC_UUID = "19b10001-0000-1000-8000-00805f9b34fb"
 
+# Modelo y ventana
+SCRIPT_DIR = os.path.dirname(__file__)
+# Por defecto usar modelo localizado en la misma carpeta que este script: Codigos_raspberry/modelo.h5
+MODEL_PATH = os.environ.get("MODEL_PATH", os.path.join(SCRIPT_DIR, "modelo.h5"))
+WINDOW_SIZE = int(os.environ.get("WINDOW_SIZE", "200"))  # usar 200 lecturas
+PREDICT_INTERVAL = float(os.environ.get("PREDICT_INTERVAL", "0.1"))  # segundos (0.1s)
+UMBRAL_PROB = float(os.environ.get("UMBRAL_PROB", "0.95"))
+
 # Estado de conteo para tasa
 total_count = 0
 last_second_count = 0
 _lock = asyncio.Lock()
+
+# Buffer para muestras (cada muestra: [ax,ay,az,gx,gy,gz])
+ventana = deque(maxlen=WINDOW_SIZE)
+modelo = None
 
 def parse_binary_packet(data: bytes):
     """Parsea paquete little-endian [seq:uint32][6*int16] => 16 bytes."""
@@ -80,6 +96,17 @@ async def notification_handler(sender, data: bytearray):
     async with _lock:
         total_count += 1
         last_second_count += 1
+        # Añadir muestra a la ventana (ax,ay,az,gx,gy,gz)
+        cad_local = parsed.get("cadera")
+        if cad_local:
+            try:
+                sample = [
+                    float(cad_local.get("adxl_x", 0)), float(cad_local.get("adxl_y", 0)), float(cad_local.get("adxl_z", 0)),
+                    float(cad_local.get("itg_x", 0)),  float(cad_local.get("itg_y", 0)),  float(cad_local.get("itg_z", 0))
+                ]
+                ventana.append(sample)
+            except Exception:
+                pass
 
     seq = parsed.get("seq")
     cad = parsed.get("cadera", {})
@@ -100,6 +127,42 @@ async def rate_printer():
             tot = total_count
         print(f"→ Tasa: {rate} mensajes/s  (total={tot})")
 
+
+def cargar_modelo():
+    """Carga el modelo Keras especificado en MODEL_PATH."""
+    global modelo
+    try:
+        if not os.path.exists(MODEL_PATH):
+            print(f"⚠️ Modelo no encontrado en '{MODEL_PATH}'. Prepara o coloca el archivo antes de predecir.")
+            modelo = None
+            return
+        modelo = keras.models.load_model(MODEL_PATH)
+        print(f"✅ Modelo cargado: {MODEL_PATH}")
+    except Exception as e:
+        modelo = None
+        print(f"❌ Error cargando modelo: {e}")
+
+
+async def predictor_loop():
+    """Cada PREDICT_INTERVAL segundos aplica el modelo sobre las últimas WINDOW_SIZE muestras."""
+    global ventana, modelo
+    while True:
+        await asyncio.sleep(PREDICT_INTERVAL)
+        try:
+            async with _lock:
+                if modelo is None or len(ventana) < WINDOW_SIZE:
+                    continue
+                recent = list(ventana)[-WINDOW_SIZE:]
+            X = np.array(recent).reshape(1, WINDOW_SIZE, 6)
+            pred = modelo.predict(X, verbose=0)[0][0]
+            ts = datetime.now().strftime("%H:%M:%S.%f")[:-3]
+            if pred >= UMBRAL_PROB:
+                print(f"[{ts}] 🔴 PREDICCIÓN CAÍDA - prob={pred:.3f}")
+            else:
+                print(f"[{ts}] prob={pred:.3f}")
+        except Exception as e:
+            print(f"Error en predictor: {e}")
+
 async def find_device_by_name(name, timeout=5.0):
     devices = await BleakScanner.discover(timeout=timeout)
     for d in devices:
@@ -110,6 +173,8 @@ async def find_device_by_name(name, timeout=5.0):
 async def main():
     addr = CADERA_MAC or ""
     print("Iniciando lector BLE (muestra datos y tasa por segundo)...")
+    # Cargar modelo antes de iniciar
+    cargar_modelo()
     while True:
         try:
             if not addr:
@@ -131,11 +196,13 @@ async def main():
                 print("Conectado. Suscribiendo notificaciones...")
                 await client.start_notify(CHARACTERISTIC_UUID, notification_handler)
                 rate_task = asyncio.create_task(rate_printer())
+                predictor_task = asyncio.create_task(predictor_loop())
                 try:
                     while client.is_connected:
                         await asyncio.sleep(1)
                 finally:
                     rate_task.cancel()
+                    predictor_task.cancel()
                     try:
                         await client.stop_notify(CHARACTERISTIC_UUID)
                     except Exception:
