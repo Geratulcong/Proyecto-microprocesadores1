@@ -426,31 +426,60 @@ async def conectar_dispositivos():
     cadera_addr, pierna_addr = await find_devices()
     
     print(f"\n🔗 Conectando a ambos dispositivos...")
-    
-    async with BleakClient(cadera_addr, timeout=30.0) as client_cadera, \
-               BleakClient(pierna_addr, timeout=30.0) as client_pierna:
-        
-        print(f"✅ Conectado a CADERA: {cadera_addr}")
-        print(f"✅ Conectado a PIERNA: {pierna_addr}")
-        
-        # Suscribirse a notificaciones de ambos
-        await client_cadera.start_notify(CHAR_CADERA, handler_cadera)
-        await client_pierna.start_notify(CHAR_PIERNA, handler_pierna)
-        
-        print("\n📡 Recibiendo datos de ambos sensores...")
-        
-        # Iniciar detección de caídas
-        tarea_deteccion = asyncio.create_task(detectar_caidas())
-        
-        try:
-            # Mantener conexión activa
-            while True:
-                await asyncio.sleep(1)
-        except asyncio.CancelledError:
-            tarea_deteccion.cancel()
-            await client_cadera.stop_notify(CHAR_CADERA)
-            await client_pierna.stop_notify(CHAR_PIERNA)
-            raise
+    # Si ambos dispositivos están presentes, usar el modo dual original
+    if not SINGLE_MODE:
+        async with BleakClient(cadera_addr, timeout=30.0) as client_cadera, \
+                   BleakClient(pierna_addr, timeout=30.0) as client_pierna:
+
+            print(f"✅ Conectado a CADERA: {cadera_addr}")
+            print(f"✅ Conectado a PIERNA: {pierna_addr}")
+
+            # Suscribirse a notificaciones de ambos
+            await client_cadera.start_notify(CHAR_CADERA, handler_cadera)
+            await client_pierna.start_notify(CHAR_PIERNA, handler_pierna)
+
+            print("\n📡 Recibiendo datos de ambos sensores...")
+
+            # Iniciar detección de caídas
+            tarea_deteccion = asyncio.create_task(detectar_caidas())
+
+            try:
+                # Mantener conexión activa
+                while True:
+                    await asyncio.sleep(1)
+            except asyncio.CancelledError:
+                tarea_deteccion.cancel()
+                await client_cadera.stop_notify(CHAR_CADERA)
+                await client_pierna.stop_notify(CHAR_PIERNA)
+                raise
+    else:
+        # SINGLE_MODE: conectar sólo al dispositivo disponible
+        if SINGLE_SIDE == 'cadera':
+            async with BleakClient(cadera_addr, timeout=30.0) as client_cadera:
+                print(f"✅ Conectado a CADERA: {cadera_addr} (modo single)")
+                await client_cadera.start_notify(CHAR_CADERA, handler_cadera)
+                print("\n📡 Recibiendo datos del sensor disponible (CADERA). Se duplicará para PIERNA.")
+                tarea_deteccion = asyncio.create_task(detectar_caidas())
+                try:
+                    while True:
+                        await asyncio.sleep(1)
+                except asyncio.CancelledError:
+                    tarea_deteccion.cancel()
+                    await client_cadera.stop_notify(CHAR_CADERA)
+                    raise
+        else:
+            async with BleakClient(pierna_addr, timeout=30.0) as client_pierna:
+                print(f"✅ Conectado a PIERNA: {pierna_addr} (modo single)")
+                await client_pierna.start_notify(CHAR_PIERNA, handler_pierna)
+                print("\n📡 Recibiendo datos del sensor disponible (PIERNA). Se duplicará para CADERA.")
+                tarea_deteccion = asyncio.create_task(detectar_caidas())
+                try:
+                    while True:
+                        await asyncio.sleep(1)
+                except asyncio.CancelledError:
+                    tarea_deteccion.cancel()
+                    await client_pierna.stop_notify(CHAR_PIERNA)
+                    raise
 
 # --- LOOP PRINCIPAL ---
 async def main_loop():
