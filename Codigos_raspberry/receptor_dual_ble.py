@@ -160,6 +160,8 @@ ultima_alerta = 0  # Timestamp de la última alerta enviada
 # Buffer circular para ventana deslizante
 ventana = deque(maxlen=WINDOW_SIZE)
 modelo = None
+SINGLE_MODE = False
+SINGLE_SIDE = None  # 'cadera' or 'pierna' when SINGLE_MODE True
 
 print("╔════════════════════════════════════════════════╗")
 print("║   Detector de Caídas - Dual BLE + CNN        ║")
@@ -214,9 +216,21 @@ async def find_devices():
             pierna_addr = device.address
             print(f"✅ Encontrado PIERNA: {device.name} ({device.address})")
     
-    if not cadera_addr or not pierna_addr:
-        raise Exception(f"❌ No se encontraron ambos dispositivos")
-    
+    # Si no se encuentran ninguno, error
+    if not cadera_addr and not pierna_addr:
+        raise Exception(f"❌ No se encontraron dispositivos (ni cadera ni pierna)")
+
+    # Si sólo uno está presente, habilitar SINGLE_MODE para poder usar un solo Arduino
+    global SINGLE_MODE, SINGLE_SIDE
+    if cadera_addr and not pierna_addr:
+        SINGLE_MODE = True
+        SINGLE_SIDE = 'cadera'
+        print("⚠️ Modo single: encontrado solo CADERA. Se usará la misma señal para la pierna (duplicada).")
+    elif pierna_addr and not cadera_addr:
+        SINGLE_MODE = True
+        SINGLE_SIDE = 'pierna'
+        print("⚠️ Modo single: encontrado solo PIERNA. Se usará la misma señal para la cadera (duplicada).")
+
     return cadera_addr, pierna_addr
 
 # --- HANDLERS DE NOTIFICACIONES ---
@@ -362,11 +376,23 @@ async def detectar_caidas():
         
         # Combinar datos de ambos sensores (12 features)
         # Escalar giroscopio x4 (mismo factor usado en entrenamiento)
+        # Si estamos en SINGLE_MODE se duplica la señal disponible para llenar las 12 features
+        if SINGLE_MODE:
+            if SINGLE_SIDE == 'cadera':
+                datos_pierna_local = datos_cadera.copy()
+                datos_cadera_local = datos_cadera
+            else:
+                datos_cadera_local = datos_pierna.copy()
+                datos_pierna_local = datos_pierna
+        else:
+            datos_cadera_local = datos_cadera
+            datos_pierna_local = datos_pierna
+
         muestra = [
-            datos_cadera["ax"], datos_cadera["ay"], datos_cadera["az"],
-            datos_cadera["gx"], datos_cadera["gy"], datos_cadera["gz"],
-            datos_pierna["ax"], datos_pierna["ay"], datos_pierna["az"],
-            datos_pierna["gx"], datos_pierna["gy"], datos_pierna["gz"]
+            datos_cadera_local["ax"], datos_cadera_local["ay"], datos_cadera_local["az"],
+            datos_cadera_local["gx"], datos_cadera_local["gy"], datos_cadera_local["gz"],
+            datos_pierna_local["ax"], datos_pierna_local["ay"], datos_pierna_local["az"],
+            datos_pierna_local["gx"], datos_pierna_local["gy"], datos_pierna_local["gz"]
         ]
         
         # Agregar a ventana deslizante
@@ -386,10 +412,10 @@ async def detectar_caidas():
                     estado = f"✅ OK ({prob_caida*100:.1f}%)"
             
             print(f"{contador:<6} "
-                  f"({datos_cadera['ax']:6.3f},{datos_cadera['ay']:6.3f},{datos_cadera['az']:6.3f} | "
-                  f"{datos_cadera['gx']:6.3f},{datos_cadera['gy']:6.3f},{datos_cadera['gz']:6.3f})  "
-                  f"({datos_pierna['ax']:6.3f},{datos_pierna['ay']:6.3f},{datos_pierna['az']:6.3f} | "
-                  f"{datos_pierna['gx']:6.3f},{datos_pierna['gy']:6.3f},{datos_pierna['gz']:6.3f})  {estado}")
+            f"({datos_cadera_local['ax']:6.3f},{datos_cadera_local['ay']:6.3f},{datos_cadera_local['az']:6.3f} | "
+            f"{datos_cadera_local['gx']:6.3f},{datos_cadera_local['gy']:6.3f},{datos_cadera_local['gz']:6.3f})  "
+            f"({datos_pierna_local['ax']:6.3f},{datos_pierna_local['ay']:6.3f},{datos_pierna_local['az']:6.3f} | "
+            f"{datos_pierna_local['gx']:6.3f},{datos_pierna_local['gy']:6.3f},{datos_pierna_local['gz']:6.3f})  {estado}")
         
     # Esperar el intervalo definido por la tasa de muestreo
     await asyncio.sleep(SLEEP_INTERVAL)
