@@ -25,8 +25,15 @@ CHAR_CADERA = "19b10001-0000-1000-8000-00805f9b34fb"
 CHAR_PIERNA = "19b20001-0000-1000-8000-00805f9b34fb"
 
 # Modelo y ventana de detección
-MODEL_PATH = "modelo_caidas_arduino.h5"
-WINDOW_SIZE = 40  # 2 segundos a 20Hz
+MODEL_PATH = "modelo.h5"
+# Configurar para 200 Hz (para que coincida con los ficheros SisFall)
+SAMPLING_RATE = 200  # Hz
+WINDOW_SECONDS = 2.0  # Duración de la ventana en segundos (mantener 2s como antes)
+WINDOW_SIZE = int(SAMPLING_RATE * WINDOW_SECONDS)  # muestras por ventana (ej. 400 para 2s a 200Hz)
+PREDICT_INTERVAL_SECONDS = 0.25  # cada cuánto tiempo hacemos una predicción aproximada
+PREDICT_EVERY_SAMPLES = max(1, int(PREDICT_INTERVAL_SECONDS * SAMPLING_RATE))
+SLEEP_INTERVAL = 1.0 / SAMPLING_RATE
+
 UMBRAL_CAIDA = 0.95  # 95% de confianza requerida
 
 # Firebase Firestore (REST API)
@@ -140,9 +147,9 @@ def actualizar_estado_documento(doc_id: str, enviado: bool, error_msg: str | Non
         if r.status_code == 200:
             print("📝 Documento actualizado con estado de envío")
         else:
-            print(f"⚠️  No se pudo actualizar el documento: {r.status_code} - {r.text[:200]}")
+            print(f"No se pudo actualizar el documento: {r.status_code} - {r.text[:200]}")
     except Exception as e:
-        print(f"⚠️  Error actualizando documento: {e}")
+        print(f"Error actualizando documento: {e}")
 
 # --- VARIABLES GLOBALES ---
 datos_cadera = {"ax": 0, "ay": 0, "az": 0, "gx": 0, "gy": 0, "gz": 0}
@@ -158,9 +165,10 @@ print("╔═══════════════════════�
 print("║   Detector de Caídas - Dual BLE + CNN        ║")
 print("║   + Alertas Firestore                         ║")
 print("╚════════════════════════════════════════════════╝")
-print(f"📍 Firestore: Historial/Personas/Vicente")
-print(f"⏱️  Cooldown alertas: {COOLDOWN_ALERTAS}s")
-print(f"🎯 Umbral detección: {UMBRAL_CAIDA*100:.0f}%\n")
+print(f"Firestore: Historial/Personas/Vicente")
+print(f"Cooldown alertas: {COOLDOWN_ALERTAS}s")
+print(f"Umbral detección: {UMBRAL_CAIDA*100:.0f}%")
+print(f"Muestreo receptor: {SAMPLING_RATE} Hz | Window: {WINDOW_SIZE} muestras ({WINDOW_SECONDS}s) | Predict cada ~{PREDICT_INTERVAL_SECONDS}s ({PREDICT_EVERY_SAMPLES} muestras)\n")
 
 # --- CARGAR MODELO ---
 def cargar_modelo():
@@ -168,9 +176,22 @@ def cargar_modelo():
     global modelo
     try:
         modelo = keras.models.load_model(MODEL_PATH)
-        num_features = modelo.input_shape[2]
+        # Keras model input_shape suele ser (None, timesteps, features)
+        input_shape = modelo.input_shape
+        try:
+            model_timesteps = int(input_shape[1])
+            num_features = int(input_shape[2])
+        except Exception:
+            # Forma inesperada -> sólo obtener features si es posible
+            num_features = modelo.input_shape[-1]
+            model_timesteps = None
+
         print(f"✅ Modelo cargado: {MODEL_PATH}")
-        print(f"   📊 Entrada: (batch, {WINDOW_SIZE}, {num_features})")
+        print(f"   📊 Modelo espera entrada: (batch, {model_timesteps}, {num_features})")
+        if model_timesteps is not None and model_timesteps != WINDOW_SIZE:
+            print("⚠️ ADVERTENCIA: El tamaño temporal del modelo no coincide con WINDOW_SIZE del receptor.")
+            print(f"   Modelo timesteps: {model_timesteps} vs Receptor WINDOW_SIZE: {WINDOW_SIZE}")
+            print("   Debes reentrenar el modelo o ajustar WINDOW_SECONDS/SAMPLING_RATE para que coincidan.")
         return num_features
     except Exception as e:
         print(f"❌ Error cargando modelo: {e}")
@@ -343,17 +364,17 @@ async def detectar_caidas():
         # Escalar giroscopio x4 (mismo factor usado en entrenamiento)
         muestra = [
             datos_cadera["ax"], datos_cadera["ay"], datos_cadera["az"],
-            datos_cadera["gx"] * 4.0, datos_cadera["gy"] * 4.0, datos_cadera["gz"] * 4.0,
+            datos_cadera["gx"], datos_cadera["gy"], datos_cadera["gz"],
             datos_pierna["ax"], datos_pierna["ay"], datos_pierna["az"],
-            datos_pierna["gx"] * 4.0, datos_pierna["gy"] * 4.0, datos_pierna["gz"] * 4.0
+            datos_pierna["gx"], datos_pierna["gy"], datos_pierna["gz"]
         ]
         
         # Agregar a ventana deslizante
         ventana.append(muestra)
-        
-        # Predecir cada 5 muestras
+
+        # Predecir cada PREDICT_EVERY_SAMPLES muestras (aprox cada PREDICT_INTERVAL_SECONDS)
         estado = "⚪ Normal"
-        if contador % 5 == 0:
+        if contador % PREDICT_EVERY_SAMPLES == 0:
             prob_caida = predecir_caida()
             
             if prob_caida is not None:
@@ -370,7 +391,8 @@ async def detectar_caidas():
                   f"({datos_pierna['ax']:6.3f},{datos_pierna['ay']:6.3f},{datos_pierna['az']:6.3f} | "
                   f"{datos_pierna['gx']:6.3f},{datos_pierna['gy']:6.3f},{datos_pierna['gz']:6.3f})  {estado}")
         
-        await asyncio.sleep(0.05)  # 50ms = 20Hz
+    # Esperar el intervalo definido por la tasa de muestreo
+    await asyncio.sleep(SLEEP_INTERVAL)
 
 # --- CONEXIÓN DUAL ---
 async def conectar_dispositivos():
