@@ -25,16 +25,12 @@ CHAR_CADERA = "19b10001-0000-1000-8000-00805f9b34fb"
 CHAR_PIERNA = "19b20001-0000-1000-8000-00805f9b34fb"
 
 # Modelo y ventana de detección
-MODEL_PATH = "modelo.h5"
-# Configurar para 200 Hz (para que coincida con los ficheros SisFall)
-SAMPLING_RATE = 200  # Hz
-WINDOW_SECONDS = 2.0  # Duración de la ventana en segundos (mantener 2s como antes)
-WINDOW_SIZE = int(SAMPLING_RATE * WINDOW_SECONDS)  # muestras por ventana (ej. 400 para 2s a 200Hz)
-PREDICT_INTERVAL_SECONDS = 0.25  # cada cuánto tiempo hacemos una predicción aproximada
-PREDICT_EVERY_SAMPLES = max(1, int(PREDICT_INTERVAL_SECONDS * SAMPLING_RATE))
-SLEEP_INTERVAL = 1.0 / SAMPLING_RATE
-
+MODEL_PATH = "modelo_caidas_arduino.h5"
+WINDOW_SIZE = 40  # 2 segundos a 20Hz
 UMBRAL_CAIDA = 0.95  # 95% de confianza requerida
+# Intervalo de muestreo del receptor (segundos) y frecuencia de predicción (número de lecturas)
+SLEEP_INTERVAL = float(os.environ.get("SLEEP_INTERVAL", "0.05"))  # 50ms = 20Hz por defecto
+PREDICT_EVERY_SAMPLES = int(os.environ.get("PREDICT_EVERY_SAMPLES", "50"))  # por defecto predecir cada 50 lecturas
 
 # Firebase Firestore (REST API)
 FIREBASE_PROJECT_ID = "detector-de-caidas-360"
@@ -147,9 +143,9 @@ def actualizar_estado_documento(doc_id: str, enviado: bool, error_msg: str | Non
         if r.status_code == 200:
             print("📝 Documento actualizado con estado de envío")
         else:
-            print(f"No se pudo actualizar el documento: {r.status_code} - {r.text[:200]}")
+            print(f"⚠️  No se pudo actualizar el documento: {r.status_code} - {r.text[:200]}")
     except Exception as e:
-        print(f"Error actualizando documento: {e}")
+        print(f"⚠️  Error actualizando documento: {e}")
 
 # --- VARIABLES GLOBALES ---
 datos_cadera = {"ax": 0, "ay": 0, "az": 0, "gx": 0, "gy": 0, "gz": 0}
@@ -160,52 +156,25 @@ ultima_alerta = 0  # Timestamp de la última alerta enviada
 # Buffer circular para ventana deslizante
 ventana = deque(maxlen=WINDOW_SIZE)
 modelo = None
-SINGLE_MODE = False
-SINGLE_SIDE = None  # 'cadera' or 'pierna' when SINGLE_MODE True
-MODEL_TIMESTEPS = None
-EXPECTED_FEATURES = None
-PREFERRED_SENSOR = os.environ.get("PREFERRED_SENSOR", "cadera")  # 'cadera' or 'pierna'
 
 print("╔════════════════════════════════════════════════╗")
 print("║   Detector de Caídas - Dual BLE + CNN        ║")
 print("║   + Alertas Firestore                         ║")
 print("╚════════════════════════════════════════════════╝")
-print(f"Firestore: Historial/Personas/Vicente")
-print(f"Cooldown alertas: {COOLDOWN_ALERTAS}s")
-print(f"Umbral detección: {UMBRAL_CAIDA*100:.0f}%")
-print(f"Muestreo receptor: {SAMPLING_RATE} Hz | Window: {WINDOW_SIZE} muestras ({WINDOW_SECONDS}s) | Predict cada ~{PREDICT_INTERVAL_SECONDS}s ({PREDICT_EVERY_SAMPLES} muestras)\n")
+print(f"📍 Firestore: Historial/Personas/Vicente")
+print(f"⏱️  Cooldown alertas: {COOLDOWN_ALERTAS}s")
+print(f"🎯 Umbral detección: {UMBRAL_CAIDA*100:.0f}%\n")
+print(f"🔁 Predicción cada {PREDICT_EVERY_SAMPLES} lecturas (~{PREDICT_EVERY_SAMPLES * SLEEP_INTERVAL:.2f}s)")
 
 # --- CARGAR MODELO ---
 def cargar_modelo():
     """Carga el modelo CNN entrenado"""
     global modelo
-    global MODEL_TIMESTEPS, EXPECTED_FEATURES
     try:
         modelo = keras.models.load_model(MODEL_PATH)
-        # Keras model input_shape suele ser (None, timesteps, features)
-        input_shape = modelo.input_shape
-        try:
-            model_timesteps = int(input_shape[1])
-            num_features = int(input_shape[2])
-        except Exception:
-            # Forma inesperada -> sólo obtener features si es posible
-            num_features = modelo.input_shape[-1]
-            model_timesteps = None
-
+        num_features = modelo.input_shape[2]
         print(f"✅ Modelo cargado: {MODEL_PATH}")
-        print(f"   📊 Modelo espera entrada: (batch, {model_timesteps}, {num_features})")
-        # Guardar valores globales para uso en tiempo de ejecución
-        MODEL_TIMESTEPS = model_timesteps
-        EXPECTED_FEATURES = num_features
-
-        if model_timesteps is not None and model_timesteps != WINDOW_SIZE:
-            print("⚠️ ADVERTENCIA: El tamaño temporal del modelo no coincide con WINDOW_SIZE del receptor.")
-            print(f"   Modelo timesteps: {model_timesteps} vs Receptor WINDOW_SIZE: {WINDOW_SIZE}")
-            print("   El receptor usará las últimas 'model_timesteps' muestras para la predicción si es menor que WINDOW_SIZE.")
-
-        if num_features not in (6, 12):
-            print(f"⚠️ ADVERTENCIA: El modelo espera {num_features} features; el receptor soporta 6 o 12. Ajusta el modelo o el receptor.")
-
+        print(f"   📊 Entrada: (batch, {WINDOW_SIZE}, {num_features})")
         return num_features
     except Exception as e:
         print(f"❌ Error cargando modelo: {e}")
@@ -228,21 +197,9 @@ async def find_devices():
             pierna_addr = device.address
             print(f"✅ Encontrado PIERNA: {device.name} ({device.address})")
     
-    # Si no se encuentran ninguno, error
-    if not cadera_addr and not pierna_addr:
-        raise Exception(f"❌ No se encontraron dispositivos (ni cadera ni pierna)")
-
-    # Si sólo uno está presente, habilitar SINGLE_MODE para poder usar un solo Arduino
-    global SINGLE_MODE, SINGLE_SIDE
-    if cadera_addr and not pierna_addr:
-        SINGLE_MODE = True
-        SINGLE_SIDE = 'cadera'
-        print("⚠️ Modo single: encontrado solo CADERA. Se usará la misma señal para la pierna (duplicada).")
-    elif pierna_addr and not cadera_addr:
-        SINGLE_MODE = True
-        SINGLE_SIDE = 'pierna'
-        print("⚠️ Modo single: encontrado solo PIERNA. Se usará la misma señal para la cadera (duplicada).")
-
+    if not cadera_addr or not pierna_addr:
+        raise Exception(f"❌ No se encontraron ambos dispositivos")
+    
     return cadera_addr, pierna_addr
 
 # --- HANDLERS DE NOTIFICACIONES ---
@@ -362,34 +319,13 @@ def predecir_caida():
     """Usa el modelo CNN para predecir si hay caída"""
     global ventana, modelo
     
-    # Usar MODEL_TIMESTEPS si está definido; si no, usar WINDOW_SIZE
-    timesteps_needed = MODEL_TIMESTEPS or WINDOW_SIZE
-    if len(ventana) < timesteps_needed:
+    if len(ventana) < WINDOW_SIZE:
         return None  # No hay suficientes datos aún
-
-    # Tomar las últimas 'timesteps_needed' muestras
-    recent = list(ventana)[-timesteps_needed:]
-
-    # Construir X según EXPECTED_FEATURES (6 o 12)
-    if EXPECTED_FEATURES == 6:
-        # Seleccionar las 6 features del sensor preferido
-        if PREFERRED_SENSOR == 'pierna' and (SINGLE_MODE and SINGLE_SIDE == 'pierna' or not SINGLE_MODE):
-            # Usar pierna
-            X_raw = [[
-                row[6], row[7], row[8],  # ax, ay, az of pierna
-                row[9], row[10], row[11]  # gx, gy, gz of pierna
-            ] for row in recent]
-        else:
-            # Por defecto usar cadera
-            X_raw = [[
-                row[0], row[1], row[2],  # ax, ay, az of cadera
-                row[3], row[4], row[5]   # gx, gy, gz of cadera
-            ] for row in recent]
-        X = np.array(X_raw).reshape(1, timesteps_needed, 6)
-    else:
-        # Esperando 12 features
-        X = np.array(recent).reshape(1, timesteps_needed, -1)
-
+    
+    # Convertir ventana a numpy array
+    X = np.array(list(ventana))  # Shape: (40, 12)
+    X = X.reshape(1, WINDOW_SIZE, -1)  # Shape: (1, 40, 12)
+    
     # Predecir
     pred = modelo.predict(X, verbose=0)[0][0]
     return pred
@@ -409,29 +345,17 @@ async def detectar_caidas():
         
         # Combinar datos de ambos sensores (12 features)
         # Escalar giroscopio x4 (mismo factor usado en entrenamiento)
-        # Si estamos en SINGLE_MODE se duplica la señal disponible para llenar las 12 features
-        if SINGLE_MODE:
-            if SINGLE_SIDE == 'cadera':
-                datos_pierna_local = datos_cadera.copy()
-                datos_cadera_local = datos_cadera
-            else:
-                datos_cadera_local = datos_pierna.copy()
-                datos_pierna_local = datos_pierna
-        else:
-            datos_cadera_local = datos_cadera
-            datos_pierna_local = datos_pierna
-
         muestra = [
-            datos_cadera_local["ax"], datos_cadera_local["ay"], datos_cadera_local["az"],
-            datos_cadera_local["gx"], datos_cadera_local["gy"], datos_cadera_local["gz"],
-            datos_pierna_local["ax"], datos_pierna_local["ay"], datos_pierna_local["az"],
-            datos_pierna_local["gx"], datos_pierna_local["gy"], datos_pierna_local["gz"]
+            datos_cadera["ax"], datos_cadera["ay"], datos_cadera["az"],
+            datos_cadera["gx"] * 4.0, datos_cadera["gy"] * 4.0, datos_cadera["gz"] * 4.0,
+            datos_pierna["ax"], datos_pierna["ay"], datos_pierna["az"],
+            datos_pierna["gx"] * 4.0, datos_pierna["gy"] * 4.0, datos_pierna["gz"] * 4.0
         ]
         
         # Agregar a ventana deslizante
         ventana.append(muestra)
-
-        # Predecir cada PREDICT_EVERY_SAMPLES muestras (aprox cada PREDICT_INTERVAL_SECONDS)
+        
+        # Predecir cada PREDICT_EVERY_SAMPLES muestras
         estado = "⚪ Normal"
         if contador % PREDICT_EVERY_SAMPLES == 0:
             prob_caida = predecir_caida()
@@ -445,12 +369,11 @@ async def detectar_caidas():
                     estado = f"✅ OK ({prob_caida*100:.1f}%)"
             
             print(f"{contador:<6} "
-            f"({datos_cadera_local['ax']:6.3f},{datos_cadera_local['ay']:6.3f},{datos_cadera_local['az']:6.3f} | "
-            f"{datos_cadera_local['gx']:6.3f},{datos_cadera_local['gy']:6.3f},{datos_cadera_local['gz']:6.3f})  "
-            f"({datos_pierna_local['ax']:6.3f},{datos_pierna_local['ay']:6.3f},{datos_pierna_local['az']:6.3f} | "
-            f"{datos_pierna_local['gx']:6.3f},{datos_pierna_local['gy']:6.3f},{datos_pierna_local['gz']:6.3f})  {estado}")
+                  f"({datos_cadera['ax']:6.3f},{datos_cadera['ay']:6.3f},{datos_cadera['az']:6.3f} | "
+                  f"{datos_cadera['gx']:6.3f},{datos_cadera['gy']:6.3f},{datos_cadera['gz']:6.3f})  "
+                  f"({datos_pierna['ax']:6.3f},{datos_pierna['ay']:6.3f},{datos_pierna['az']:6.3f} | "
+                  f"{datos_pierna['gx']:6.3f},{datos_pierna['gy']:6.3f},{datos_pierna['gz']:6.3f})  {estado}")
         
-    # Esperar el intervalo definido por la tasa de muestreo
     await asyncio.sleep(SLEEP_INTERVAL)
 
 # --- CONEXIÓN DUAL ---
@@ -459,60 +382,31 @@ async def conectar_dispositivos():
     cadera_addr, pierna_addr = await find_devices()
     
     print(f"\n🔗 Conectando a ambos dispositivos...")
-    # Si ambos dispositivos están presentes, usar el modo dual original
-    if not SINGLE_MODE:
-        async with BleakClient(cadera_addr, timeout=30.0) as client_cadera, \
-                   BleakClient(pierna_addr, timeout=30.0) as client_pierna:
-
-            print(f"✅ Conectado a CADERA: {cadera_addr}")
-            print(f"✅ Conectado a PIERNA: {pierna_addr}")
-
-            # Suscribirse a notificaciones de ambos
-            await client_cadera.start_notify(CHAR_CADERA, handler_cadera)
-            await client_pierna.start_notify(CHAR_PIERNA, handler_pierna)
-
-            print("\n📡 Recibiendo datos de ambos sensores...")
-
-            # Iniciar detección de caídas
-            tarea_deteccion = asyncio.create_task(detectar_caidas())
-
-            try:
-                # Mantener conexión activa
-                while True:
-                    await asyncio.sleep(1)
-            except asyncio.CancelledError:
-                tarea_deteccion.cancel()
-                await client_cadera.stop_notify(CHAR_CADERA)
-                await client_pierna.stop_notify(CHAR_PIERNA)
-                raise
-    else:
-        # SINGLE_MODE: conectar sólo al dispositivo disponible
-        if SINGLE_SIDE == 'cadera':
-            async with BleakClient(cadera_addr, timeout=30.0) as client_cadera:
-                print(f"✅ Conectado a CADERA: {cadera_addr} (modo single)")
-                await client_cadera.start_notify(CHAR_CADERA, handler_cadera)
-                print("\n📡 Recibiendo datos del sensor disponible (CADERA). Se duplicará para PIERNA.")
-                tarea_deteccion = asyncio.create_task(detectar_caidas())
-                try:
-                    while True:
-                        await asyncio.sleep(1)
-                except asyncio.CancelledError:
-                    tarea_deteccion.cancel()
-                    await client_cadera.stop_notify(CHAR_CADERA)
-                    raise
-        else:
-            async with BleakClient(pierna_addr, timeout=30.0) as client_pierna:
-                print(f"✅ Conectado a PIERNA: {pierna_addr} (modo single)")
-                await client_pierna.start_notify(CHAR_PIERNA, handler_pierna)
-                print("\n📡 Recibiendo datos del sensor disponible (PIERNA). Se duplicará para CADERA.")
-                tarea_deteccion = asyncio.create_task(detectar_caidas())
-                try:
-                    while True:
-                        await asyncio.sleep(1)
-                except asyncio.CancelledError:
-                    tarea_deteccion.cancel()
-                    await client_pierna.stop_notify(CHAR_PIERNA)
-                    raise
+    
+    async with BleakClient(cadera_addr, timeout=30.0) as client_cadera, \
+               BleakClient(pierna_addr, timeout=30.0) as client_pierna:
+        
+        print(f"✅ Conectado a CADERA: {cadera_addr}")
+        print(f"✅ Conectado a PIERNA: {pierna_addr}")
+        
+        # Suscribirse a notificaciones de ambos
+        await client_cadera.start_notify(CHAR_CADERA, handler_cadera)
+        await client_pierna.start_notify(CHAR_PIERNA, handler_pierna)
+        
+        print("\n📡 Recibiendo datos de ambos sensores...")
+        
+        # Iniciar detección de caídas
+        tarea_deteccion = asyncio.create_task(detectar_caidas())
+        
+        try:
+            # Mantener conexión activa
+            while True:
+                await asyncio.sleep(1)
+        except asyncio.CancelledError:
+            tarea_deteccion.cancel()
+            await client_cadera.stop_notify(CHAR_CADERA)
+            await client_pierna.stop_notify(CHAR_PIERNA)
+            raise
 
 # --- LOOP PRINCIPAL ---
 async def main_loop():
