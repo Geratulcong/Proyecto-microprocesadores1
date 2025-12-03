@@ -146,16 +146,18 @@ print(f"\n🧠 Creando modelo CNN 1D para {num_features} features...")
 print("   Modelo simplificado (menos parámetros, más regularización)\n")
 
 model = Sequential([
-    # Una sola capa convolucional más simple
-    Conv1D(16, kernel_size=3, activation='relu', input_shape=(WINDOW_SIZE, num_features)),
+    Conv1D(32, 3, activation='relu', padding='same', input_shape=(WINDOW_SIZE, num_features)),
     MaxPooling1D(2),
-    Dropout(0.5),  # Mayor dropout para prevenir overfitting
     
-    # Capa densa más pequeña
+    Conv1D(64, 3, activation='relu', padding='same'),
+    MaxPooling1D(2),
+    Dropout(0.4),
+    
     Flatten(),
-    Dense(32, activation='relu'),
+    Dense(64, activation='relu'),
     Dropout(0.5),
-    Dense(1, activation='sigmoid')  # Binario: 0=normal, 1=caída
+    
+    Dense(1, activation='sigmoid')
 ])
 
 model.compile(optimizer='adam', loss='binary_crossentropy', metrics=['accuracy'])
