@@ -10,8 +10,8 @@ import matplotlib.pyplot as plt
 
 # ---------------- CONFIGURACIÓN ----------------
 DATOS_DIR = Path(__file__).parent / "datos_capturados"
-WINDOW_SIZE = 40
-OVERLAP = 20
+WINDOW_SIZE = 80  # 2 segundos a 40Hz
+OVERLAP = 40    # 50% de solapamiento
 TEST_SIZE = 0.2
 EPOCHS = 15
 BATCH_SIZE = 16

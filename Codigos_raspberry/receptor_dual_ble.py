@@ -26,7 +26,7 @@ CHAR_PIERNA = "19b20001-0000-1000-8000-00805f9b34fb"
 
 # Modelo y ventana de detección
 MODEL_PATH = "modelo_cnn_imu.h5"
-WINDOW_SIZE = 40  # 2 segundos a 20Hz
+WINDOW_SIZE = 80  # 2 segundos a 40Hz
 UMBRAL_CAIDA = 0.95  # 95% de confianza requerida
 
 # Firebase Firestore (REST API)
