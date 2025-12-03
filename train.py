@@ -1,212 +1,153 @@
-import numpy as np
 import pandas as pd
+import numpy as np
 from pathlib import Path
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import confusion_matrix, classification_report
 from tensorflow.keras.models import Sequential
-from tensorflow.keras.layers import Conv1D, MaxPooling1D, Flatten, Dense, Dropout
-from tensorflow.keras.optimizers import Adam
+from tensorflow.keras.layers import Conv1D, MaxPooling1D, Dropout, Flatten, Dense
+from tensorflow.keras.callbacks import EarlyStopping
 import matplotlib.pyplot as plt
+import seaborn as sns
 
-# ---------------- CONFIGURACIÓN ----------------
-DATOS_DIR = Path(__file__).parent / "datos_capturados"
-WINDOW_SIZE = 80  # 2 segundos a 40Hz
-OVERLAP = 40    # 50% de solapamiento
+# --- CONFIGURACIÓN ---
+WINDOW_SIZE = 40   # 40 muestras = 2 segundos a 20Hz
+OVERLAP = 20       # Solapamiento (50%)
 TEST_SIZE = 0.2
-EPOCHS = 15
+EPOCHS = 50
 BATCH_SIZE = 16
-CSV_PATH = "datos.csv"
 
-# ------------------------------------------------
-# 1) Cargar CSV
-# ------------------------------------------------
-df = pd.read_csv(CSV_PATH, dtype=str)
+print("\n╔══════════════════════════════════════════════╗")
+print("║        ENTRENAMIENTO CNN DETECCIÓN CAIDAS    ║")
+print("╚══════════════════════════════════════════════╝\n")
 
-# Columnas
-FEATURE_COLS = [
-    "cadera_ax","cadera_ay","cadera_az",
-    "cadera_gx","cadera_gy","cadera_gz",
-    "pierna_ax","pierna_ay","pierna_az",
-    "pierna_gx","pierna_gy","pierna_gz"
+# --- 1. CARGAR CSV ---
+df = pd.read_csv("datos.csv")
+print(f"   ✅ CSV cargado: {len(df)} muestras\n")
+
+# Columnas a usar
+cols = [
+    'cadera_ax','cadera_ay','cadera_az',
+    'cadera_gx','cadera_gy','cadera_gz',
+    'pierna_ax','pierna_ay','pierna_az',
+    'pierna_gx','pierna_gy','pierna_gz'
 ]
-for col in FEATURE_COLS:
-    df[col] = pd.to_numeric(df[col], errors='coerce')
-df["state"] = pd.to_numeric(df["state"], errors='coerce').astype("Int64")
 
-#NaN
-df = df.dropna()
-# 💥 AUMENTAR PESO DEL GIROSCOPIO DE LA PIERNA CUANDO STATE = 1
-mask_caidas = df["state"] == 1
-df.loc[mask_caidas, ["pierna_gx", "pierna_gy", "pierna_gz"]] *= 6
+# Etiqueta
+label_col = 'state'
 
-data = df[FEATURE_COLS].astype(float).values
-labels = df["state"].astype(int).values
+# Escalar giroscopios x4 para resaltar movimientos bruscos
+cols_giro = [c for c in cols if 'gx' in c or 'gy' in c or 'gz' in c]
+df[cols_giro] = df[cols_giro] * 4.0
+print("   ⚙️ Giros escalados x4\n")
 
-data = df[FEATURE_COLS].astype(float).values
-labels = df["state"].astype(int).values
+# --- 2. CREAR VENTANAS ---
+datos_totales = []
+etiquetas_totales = []
 
-# ------------------------------------------------
-# 2) Crear ventanas (sliding windows)
-# ------------------------------------------------
-def create_windows(data, labels, window_size, overlap):
-    X, y = [], []
-    step = window_size - overlap
+for i in range(0, len(df) - WINDOW_SIZE + 1, OVERLAP):
+    ventana = df.iloc[i:i+WINDOW_SIZE][cols].values
+    etiqueta = int(df[label_col].iloc[i:i+WINDOW_SIZE].mean() > 0.5)  # mayoría
+    datos_totales.append(ventana)
+    etiquetas_totales.append(etiqueta)
 
-    for i in range(0, len(data) - window_size + 1, step):
-        window = data[i:i + window_size]
-        X.append(window)
+print(f" 📊 Ventanas creadas: {len(datos_totales)}\n")
 
-        # La etiqueta de la ventana será la etiqueta mayoritaria
-        window_label = labels[i:i + window_size]
-        y.append(int(np.round(np.mean(window_label))))
+# Convertir a arrays
+X = np.array(datos_totales, dtype=np.float32)
+y = np.array(etiquetas_totales, dtype=np.int32)
 
-    return np.array(X), np.array(y)
+print("📊 Datos preparados:")
+print(f"   Total de ventanas: {len(X)}")
+print(f"   Forma de X: {X.shape}")
 
-X, y = create_windows(data, labels, WINDOW_SIZE, OVERLAP)
+unique, counts = np.unique(y, return_counts=True)
+for u, c in zip(unique, counts):
+    print(f"   Clase {u}: {c} ({c/len(y)*100:.1f}%)")
 
-print("\n" + "="*60)
-print("INFORMACIÓN DEL DATASET")
-print("="*60)
-print(f"X shape: {X.shape}")  
-print(f"y shape: {y.shape}")
-print(f"\n📊 Distribución de clases en dataset completo:")
-class_counts = np.bincount(y)
-print(f"   Clase 0 (No Caída): {class_counts[0]} ({class_counts[0]/len(y)*100:.1f}%)")
-print(f"   Clase 1 (Caída):    {class_counts[1]} ({class_counts[1]/len(y)*100:.1f}%)")
-
-# Gráfico de distribución de clases
-fig, axes = plt.subplots(1, 1, figsize=(8, 5))
-axes.bar(['No Caída', 'Caída'], class_counts, color=['green', 'red'], width=0.5)
-axes.set_title('Distribución de Clases (Dataset Completo)', fontsize=14, fontweight='bold')
-axes.set_ylabel('Cantidad', fontsize=12)
-for i, v in enumerate(class_counts):
-    axes.text(i, v + 20, str(v), ha='center', fontsize=12, fontweight='bold')
-plt.tight_layout()
-plt.savefig('class_distribution.png', dpi=100)
-print("\n✅ Gráfico de distribución guardado: class_distribution.png")
-plt.close()
-
-# ------------------------------------------------
-# 3) Train-test split
-# ------------------------------------------------
+# --- 3. TRAIN/TEST SPLIT ---
+print("\n✂️ Dividiendo datos...")
 X_train, X_test, y_train, y_test = train_test_split(
-    X, y, test_size=TEST_SIZE, shuffle=True, random_state=42
+    X, y, test_size=TEST_SIZE, stratify=y, random_state=42
 )
 
-print(f"\n🔀 Split Train/Test ({TEST_SIZE*100:.0f}%):")
-print(f"   Entrenamiento: {len(X_train)} muestras")
-print(f"      Clase 0: {np.sum(y_train==0)} | Clase 1: {np.sum(y_train==1)}")
-print(f"   Test: {len(X_test)} muestras")
-print(f"      Clase 0: {np.sum(y_test==0)} | Clase 1: {np.sum(y_test==1)}")
+print(f"   Train: {len(X_train)} ventanas")
+print(f"   Test:  {len(X_test)} ventanas\n")
 
-# ------------------------------------------------
-# 4) Crear modelo CNN 1D
-# ------------------------------------------------
+# --- 4. CREAR MODELO CNN ---
+num_features = X.shape[2]
+print(f"🧠 Modelo CNN (features={num_features})\n")
+
 model = Sequential([
-    Conv1D(32, kernel_size=3, activation='relu', input_shape=(WINDOW_SIZE, 12)),
-    MaxPooling1D(pool_size=2),
-
-    Conv1D(64, kernel_size=3, activation='relu'),
-    MaxPooling1D(pool_size=2),
-
-    Flatten(),
-    Dense(64, activation='relu'),
+    Conv1D(16, 3, activation='relu', input_shape=(WINDOW_SIZE, num_features)),
+    MaxPooling1D(2),
     Dropout(0.5),
 
+    Flatten(),
+    Dense(32, activation='relu'),
+    Dropout(0.5),
     Dense(1, activation='sigmoid')
 ])
 
-model.compile(optimizer=Adam(),
-              loss='binary_crossentropy',
-              metrics=['accuracy'])
-
+model.compile(optimizer='adam', loss='binary_crossentropy', metrics=['accuracy'])
 model.summary()
 
-# ------------------------------------------------
-# 5) Entrenar
-# ------------------------------------------------
+# --- 5. ENTRENAR ---
+print("\n🚀 Entrenando modelo...\n")
+
+early_stop = EarlyStopping(monitor='val_loss', patience=15, restore_best_weights=True)
+
 history = model.fit(
     X_train, y_train,
     validation_data=(X_test, y_test),
     epochs=EPOCHS,
-    batch_size=BATCH_SIZE
+    batch_size=BATCH_SIZE,
+    callbacks=[early_stop],
+    verbose=1
 )
 
-# ------------------------------------------------
-# 6) Evaluación en test
-# ------------------------------------------------
-print("\n" + "="*60)
-print("EVALUACIÓN")
-print("="*60)
+# --- 6. EVALUACIÓN ---
+print("\n📈 Evaluando modelo...")
+loss, acc = model.evaluate(X_test, y_test)
+print(f"   ✔ Loss: {loss:.4f} | Accuracy: {acc:.4f}")
 
-loss, accuracy = model.evaluate(X_test, y_test, verbose=0)
-print(f"\n📈 Métricas en Test Set:")
-print(f"   Loss:     {loss:.4f}")
-print(f"   Accuracy: {accuracy:.4f} ({accuracy*100:.2f}%)")
+y_pred = (model.predict(X_test) > 0.5).astype(int)
 
-# Predicciones
-y_pred = (model.predict(X_test, verbose=0) > 0.5).astype(int).flatten()
-
-# Matriz de confusión
 cm = confusion_matrix(y_test, y_pred)
-print(f"\n🔍 Matriz de Confusión:")
-print(f"   [[TN={cm[0,0]} FP={cm[0,1]}]")
-print(f"    [FN={cm[1,0]} TP={cm[1,1]}]]")
+plt.figure(figsize=(6,5))
+sns.heatmap(cm, annot=True, fmt='d', cmap='Blues',
+            xticklabels=['Normal','Caída'],
+            yticklabels=['Normal','Caída'])
+plt.title("Matriz de Confusión")
+plt.tight_layout()
+plt.savefig("matriz_confusion_arduino.png", dpi=150)
 
-# Reporte de clasificación
-print(f"\n📊 Reporte de Clasificación:")
-print(classification_report(y_test, y_pred, target_names=['No Caída', 'Caída']))
+print("💾 Matriz guardada: matriz_confusion_arduino.png")
 
-# Gráficos de Entrenamiento
-fig, axes = plt.subplots(1, 2, figsize=(14, 5))
+# Reporte
+print("\n📋 Reporte de clasificación:")
+print(classification_report(y_test, y_pred, target_names=['Normal','Caída']))
 
-# Loss
-axes[0].plot(history.history['loss'], label='Train Loss', linewidth=2, marker='o')
-axes[0].plot(history.history['val_loss'], label='Val Loss', linewidth=2, marker='s')
-axes[0].set_xlabel('Epoch', fontsize=12)
-axes[0].set_ylabel('Loss', fontsize=12)
-axes[0].set_title('Pérdida (Loss) durante Entrenamiento', fontsize=13, fontweight='bold')
-axes[0].legend(fontsize=11)
-axes[0].grid(True, alpha=0.3)
+# --- 7. GUARDAR MODELO ---
+model.save("modelo_caidas_imu.h5")
+print("\n💾 Modelo guardado: modelo_caidas_arduino.h5")
 
-# Accuracy
-axes[1].plot(history.history['accuracy'], label='Train Accuracy', linewidth=2, marker='o')
-axes[1].plot(history.history['val_accuracy'], label='Val Accuracy', linewidth=2, marker='s')
-axes[1].set_xlabel('Epoch', fontsize=12)
-axes[1].set_ylabel('Accuracy', fontsize=12)
-axes[1].set_title('Precisión (Accuracy) durante Entrenamiento', fontsize=13, fontweight='bold')
-axes[1].legend(fontsize=11)
-axes[1].grid(True, alpha=0.3)
+# --- 8. GRÁFICOS DE ENTRENAMIENTO ---
+plt.figure(figsize=(12,4))
+
+plt.subplot(1,2,1)
+plt.plot(history.history['loss'])
+plt.plot(history.history['val_loss'])
+plt.title("Pérdida")
+plt.legend(['Train','Val'])
+
+plt.subplot(1,2,2)
+plt.plot(history.history['accuracy'])
+plt.plot(history.history['val_accuracy'])
+plt.title("Precisión")
+plt.legend(['Train','Val'])
 
 plt.tight_layout()
-plt.savefig('training_metrics.png', dpi=100)
-print("\n✅ Gráfico de métricas de entrenamiento guardado: training_metrics.png")
-plt.close()
+plt.savefig("entrenamiento_arduino.png", dpi=150)
+print("\n💾 Guardado: entrenamiento_arduino.png")
 
-# Matriz de Confusión Visualizada
-fig, ax = plt.subplots(figsize=(8, 6))
-im = ax.imshow(cm, interpolation='nearest', cmap=plt.cm.Blues)
-ax.figure.colorbar(im, ax=ax)
-ax.set(xticks=np.arange(cm.shape[1]),
-       yticks=np.arange(cm.shape[0]),
-       xticklabels=['No Caída', 'Caída'],
-       yticklabels=['No Caída', 'Caída'],
-       ylabel='Verdadero',
-       xlabel='Predicho',
-       title='Matriz de Confusión')
-
-# Añadir texto con valores
-for i in range(cm.shape[0]):
-    for j in range(cm.shape[1]):
-        color = 'white' if cm[i, j] > cm.max() / 2 else 'black'
-        ax.text(j, i, format(cm[i, j], 'd'),
-                ha="center", va="center", color=color, fontsize=14, fontweight='bold')
-
-plt.tight_layout()
-plt.savefig('confusion_matrix.png', dpi=100)
-print("✅ Matriz de confusión guardada: confusion_matrix.png\n")
-plt.close()
-
-
-model.save("modelo_cnn_imu.h5")
-print("Modelo guardado como modelo_cnn_imu.h5")
+print("\n✅ ENTRENAMIENTO COMPLETADO\n")
