@@ -1,0 +1,467 @@
+extends ../layouts/dashboard.pug
+
+block config
+    - var bodyClass = 'sb-nav-fixed'
+    - var pageTitle = 'Configuración de API y Registro de Caídas'
+    - var sidenavStyle = 'sb-sidenav-dark'
+
+block content
+    .container-fluid.px-4
+        include includes/page-header.pug
+
+        // 🔧 Título principal
+        h2.text-center.mb-4 Configuración de API y Registro de Caídas
+
+        // 📱 Configuración de la API
+        .card.mb-5.shadow
+            .card-header.bg-primary.text-white.text-center Configuración de API de WhatsApp
+            .card-body
+                form#apiConfigForm.w-50.mx-auto
+                    .mb-3
+                        label.form-label(for='phone') Número de teléfono
+                        input.form-control#phone(type='tel' name='phone' placeholder='+56912345678' required)
+                    .mb-3
+                        label.form-label(for='apiCode') Código API
+                        input.form-control#apiCode(type='text' name='apiCode' placeholder='Tu código CallMeBot' required)
+                    .text-end
+                        button.btn.btn-primary#saveApi(type='button') Guardar configuración
+                    small#saveStatus.text-muted.ms-2
+
+        // 🕓 Historial de caídas
+        .card.shadow
+            .card-header.bg-secondary.text-white.d-flex.justify-content-between.align-items-center
+                span Historial de caídas registradas
+                button.btn.btn-sm.btn-light#refreshHistory(type='button' title='Actualizar historial')
+                    i.fas.fa-sync-alt
+                    |  Actualizar
+            .card-body.text-center
+                button.btn.btn-danger.mb-3#simulateFall(type='button') Simular caída
+                .mb-2
+                    small#lastUpdate.text-muted Última actualización: --
+                table.table.table-bordered.mt-3.w-75.mx-auto
+                    thead
+                        tr
+                            th #
+                            th Fecha y hora
+                            th Estado
+                    tbody#alertTableBody
+
+append scripts
+    // Firebase SDK
+    script(src='https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js')
+    script(src='https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore-compat.js')
+    script.
+        // 🔥 Configuración de Firebase
+        const firebaseConfig = {
+            apiKey: "AIzaSyDGQBWrAA1yVMnv-oQzSSYz9_YSb4A1Lhk",
+            authDomain: "detector-de-caidas-360.firebaseapp.com",
+            projectId: "detector-de-caidas-360",
+            storageBucket: "detector-de-caidas-360.firebasestorage.app",
+            messagingSenderId: "1064686963699",
+            appId: "1:1064686963699:web:df69b06a1dc3e3a29e7ed4"
+        };
+
+        // Inicializar Firebase
+        firebase.initializeApp(firebaseConfig);
+        const db = firebase.firestore();
+
+        (function() {
+            const saveBtn = document.getElementById('saveApi');
+            const simulateBtn = document.getElementById('simulateFall');
+            const refreshBtn = document.getElementById('refreshHistory');
+            const phoneInput = document.getElementById('phone');
+            const apiInput = document.getElementById('apiCode');
+            const saveStatus = document.getElementById('saveStatus');
+            const tableBody = document.getElementById('alertTableBody');
+            const lastUpdateEl = document.getElementById('lastUpdate');
+            const PERSONA = 'Vicente'; // Nombre de la persona
+
+            // Cargar configuración y tabla
+            window.addEventListener('DOMContentLoaded', () => {
+                // Primero intentar cargar desde Firestore y sincronizar a localStorage
+                loadConfigFromFirestore().finally(() => {
+                    const saved = localStorage.getItem('apiConfig');
+                    if (saved && (!phoneInput.value || !apiInput.value)) {
+                        const cfg = JSON.parse(saved);
+                        phoneInput.value = phoneInput.value || cfg.phone || '';
+                        apiInput.value = apiInput.value || cfg.apiCode || '';
+                    }
+                    loadHistory();
+                });
+            });
+
+            // Cargar configuración desde Firestore
+            async function loadConfigFromFirestore() {
+                try {
+                    const cfgDoc = await db.collection('Historial').doc('Personas').collection(PERSONA).doc('_config').get();
+                    if (cfgDoc.exists) {
+                        const data = cfgDoc.data();
+                        phoneInput.value = data.phone || '';
+                        apiInput.value = data.apiCode || '';
+                        localStorage.setItem('apiConfig', JSON.stringify({ phone: data.phone || '', apiCode: data.apiCode || '' }));
+                        console.log('⚙️ Configuración cargada desde Firestore');
+                    } else {
+                        console.log('ℹ️ Sin configuración en Firestore (usando localStorage si existe)');
+                    }
+                } catch (e) {
+                    console.warn('⚠️ No se pudo cargar configuración desde Firestore:', e.message);
+                }
+            }
+
+            // Cargar historial desde Firebase
+            async function loadHistory() {
+                try {
+                    tableBody.innerHTML = '<tr><td colspan="3" class="text-center">🔄 Cargando desde Firebase...</td></tr>';
+                    
+                    const snapshot = await db.collection('Historial')
+                        .doc('Personas')
+                        .collection(PERSONA)
+                        .orderBy('hora_caida', 'desc')
+                        .limit(20)
+                        .get();
+
+                    const caidas = [];
+                    snapshot.forEach(doc => {
+                        const data = doc.data();
+                        caidas.push({ id: doc.id, ...data });
+                    });
+
+                    renderTableFromFirebase(caidas);
+                    updateLastUpdateTime();
+                } catch (error) {
+                    console.error('Error al cargar desde Firebase:', error);
+                    tableBody.innerHTML = '<tr><td colspan="3" class="text-center text-danger">❌ Error: ' + error.message + '</td></tr>';
+                    updateLastUpdateTime();
+                }
+            }
+
+            // Actualizar timestamp
+            function updateLastUpdateTime() {
+                const now = new Date().toLocaleString('es-ES');
+                lastUpdateEl.textContent = `Última actualización: ${now}`;
+            }
+
+            // Renderizar tabla desde Firebase
+            function renderTableFromFirebase(caidas) {
+                tableBody.innerHTML = '';
+                
+                if (caidas.length === 0) {
+                    tableBody.innerHTML = '<tr><td colspan="3" class="text-muted">No hay caídas registradas en Firebase</td></tr>';
+                    return;
+                }
+
+                caidas.forEach((caida, i) => {
+                    const tr = document.createElement('tr');
+                    
+                    // Convertir timestamp
+                    let fecha = 'N/A';
+                    if (caida.hora_caida) {
+                        if (caida.hora_caida.toDate) {
+                            fecha = caida.hora_caida.toDate().toLocaleString('es-ES');
+                        } else if (caida.hora_caida.seconds) {
+                            fecha = new Date(caida.hora_caida.seconds * 1000).toLocaleString('es-ES');
+                        }
+                    }
+
+                    const tipo = caida.tipo || 'Caída detectada';
+                    const estado = caida.estado || 'Pendiente';
+                    const confianza = caida.confianza ? `${(caida.confianza * 100).toFixed(0)}%` : 'N/A';
+                    const ubicacion = caida.ubicacion || 'Desconocida';
+
+                    let estadoClass = 'bg-warning';
+                    if (estado === 'Atendido') estadoClass = 'bg-success';
+                    if (estado === 'Falsa alarma') estadoClass = 'bg-secondary';
+
+                    tr.innerHTML = `
+                        <td>${i + 1}</td>
+                        <td>
+                            <strong>${fecha}</strong><br>
+                            <small class="text-muted">📍 ${ubicacion} | 🎯 ${confianza}</small>
+                        </td>
+                        <td>
+                            <span class="badge ${estadoClass}">${estado}</span><br>
+                            <small>${tipo}</small>
+                        </td>
+                    `;
+                    tableBody.appendChild(tr);
+                });
+            }
+
+            // Botón actualizar
+            refreshBtn.addEventListener('click', () => {
+                refreshBtn.disabled = true;
+                refreshBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Actualizando...';
+                
+                loadHistory().finally(() => {
+                    refreshBtn.disabled = false;
+                    refreshBtn.innerHTML = '<i class="fas fa-sync-alt"></i> Actualizar';
+                });
+            });
+
+            // Guardar configuración
+            saveBtn.addEventListener('click', async () => {
+                const phone = phoneInput.value.trim();
+                const apiCode = apiInput.value.trim();
+                if (!phone || !apiCode) {
+                    saveStatus.textContent = '⚠️ Completa ambos campos.';
+                    return;
+                }
+                localStorage.setItem('apiConfig', JSON.stringify({ phone, apiCode }));
+                try {
+                    await db.collection('Historial').doc('Personas').collection(PERSONA).doc('_config').set({
+                        phone,
+                        apiCode,
+                        updated_at: firebase.firestore.FieldValue.serverTimestamp()
+                    });
+                    saveStatus.textContent = '✅ Configuración guardada (local & Firestore).';
+                } catch (e) {
+                    console.error('No se pudo guardar en Firestore:', e);
+                    saveStatus.textContent = '✅ Guardado local. ⚠️ Error al guardar en Firestore.';
+                }
+                setTimeout(() => (saveStatus.textContent = ''), 2000);
+            });
+
+            // Simular caída
+            simulateBtn.addEventListener('click', async () => {
+                const cfg = JSON.parse(localStorage.getItem('apiConfig') || '{}');
+                if (!cfg.phone || !cfg.apiCode) {
+                    alert('Configura tu API primero.');
+                    return;
+                }
+
+                try {
+                    simulateBtn.disabled = true;
+                    simulateBtn.textContent = '⏳ Procesando...';
+
+                    // Guardar en Firebase primero con estado "Pendiente"
+                    const docRef = await db.collection('Historial')
+                        .doc('Personas')
+                        .collection(PERSONA)
+                        .add({
+                            hora_caida: firebase.firestore.Timestamp.now(),
+                            tipo: 'Caída simulada',
+                            confianza: 0.95,
+                            ubicacion: 'Simulación web',
+                            aceleracion_max: 3.2,
+                            estado: 'Pendiente',
+                            sensor: 'Simulación manual',
+                            timestamp_servidor: firebase.firestore.FieldValue.serverTimestamp()
+                        });
+
+                    // Enviar alerta por WhatsApp
+                    const res = await fetch('http://localhost:5000/send-alert', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            phone: cfg.phone,
+                            apiCode: cfg.apiCode,
+                            message: '⚠️ Alerta: caída detectada por el sistema!'
+                        })
+                    });
+                    const data = await res.json();
+
+                    // Actualizar estado a "Enviada" si el mensaje se envió correctamente
+                    if (data.status === 'ok') {
+                        await docRef.update({
+                            estado: 'Enviada',
+                            mensaje_enviado: true,
+                            hora_envio: firebase.firestore.Timestamp.now()
+                        });
+                    } else {
+                        await docRef.update({
+                            estado: 'Error al enviar',
+                            mensaje_enviado: false,
+                            error_envio: data.message || 'Error desconocido'
+                        });
+                    }
+
+                    // Recargar tabla
+                    await loadHistory();
+                    
+                    if (data.status === 'ok') {
+                        alert('✅ Caída registrada y alerta enviada por WhatsApp!');
+                    } else {
+                        alert('⚠️ Caída registrada pero error al enviar WhatsApp: ' + (data.message || 'Error desconocido'));
+                    }
+                } catch (err) {
+                    console.error(err);
+                    alert('⚠️ Error: ' + err.message);
+                } finally {
+                    simulateBtn.disabled = false;
+                    simulateBtn.textContent = 'Simular caída';
+                }
+            });
+
+            // Auto-recargar cada 30 segundos
+            setInterval(loadHistory, 30000);
+
+            // 🔔 LISTENER EN TIEMPO REAL - Enviar WhatsApp al detectar nueva caída
+            let primeraVez = true;
+            const procesados = new Set();
+            let ultimoEnvioWhatsApp = 0; // throttle: máximo 1 cada 10s
+
+            async function enviarWhatsAppAlerta(alerta, alertaId) {
+                const cfg = JSON.parse(localStorage.getItem('apiConfig') || '{}');
+                if (!cfg.phone || !cfg.apiCode) {
+                    console.warn('⚠️ No hay configuración de WhatsApp guardada');
+                    return { status: 'error', message: 'Falta configuración' };
+                }
+
+                try {
+                    const ahora = Date.now();
+                    if (ahora - ultimoEnvioWhatsApp < 10000) {
+                        console.log('⏳ Rate limit activo: omitiendo envío (10s)');
+                        return { status: 'rate-limited' };
+                    }
+                    const probabilidad = ((alerta.confianza || alerta.probabilidad || 0) * 100).toFixed(1);
+                    const fecha = alerta.hora_caida
+                        ? (alerta.hora_caida.toDate ? alerta.hora_caida.toDate().toLocaleString('es-ES') : new Date().toLocaleString('es-ES'))
+                        : new Date().toLocaleString('es-ES');
+
+                    const mensaje =
+                        `🚨 ALERTA DE CAÍDA DETECTADA\n\n` +
+                        `👤 Persona: Vicente\n` +
+                        `📅 Fecha: ${fecha}\n` +
+                        `🎯 Confianza: ${probabilidad}%\n` +
+                        `🆔 ID: ${alertaId}\n` +
+                        `${alerta.ubicacion ? `📍 Ubicación: ${alerta.ubicacion}\n` : ''}` +
+                        `\nVerifica el estado de la persona inmediatamente.`;
+
+                    console.log('📱 Enviando WhatsApp vía servidor local...');
+                    const res = await fetch('http://localhost:5000/send-alert', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ phone: cfg.phone, apiCode: cfg.apiCode, message: mensaje })
+                    });
+                    const data = await res.json().catch(() => ({}));
+                    if (res.ok && data.status === 'ok') {
+                        console.log('✅ WhatsApp enviado correctamente');
+                        ultimoEnvioWhatsApp = ahora;
+                        return { status: 'sent' };
+                    } else {
+                        console.error('❌ Error enviando WhatsApp:', data?.message || res.statusText || 'Error desconocido');
+                        return { status: 'error', message: data?.message || res.statusText || 'Error desconocido' };
+                    }
+                } catch (error) {
+                    console.error('❌ Error al enviar WhatsApp:', error);
+                    return { status: 'error', message: String(error) };
+                }
+            }
+
+            function reproducirSonidoAlerta() {
+                try {
+                    const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+                    const osc1 = audioContext.createOscillator();
+                    const gain1 = audioContext.createGain();
+                    osc1.connect(gain1); gain1.connect(audioContext.destination);
+                    osc1.frequency.value = 800; osc1.type = 'sine';
+                    gain1.gain.setValueAtTime(0.3, audioContext.currentTime);
+                    gain1.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.5);
+                    osc1.start(audioContext.currentTime); osc1.stop(audioContext.currentTime + 0.5);
+                    setTimeout(() => {
+                        const osc2 = audioContext.createOscillator();
+                        const gain2 = audioContext.createGain();
+                        osc2.connect(gain2); gain2.connect(audioContext.destination);
+                        osc2.frequency.value = 1000; osc2.type = 'sine';
+                        gain2.gain.setValueAtTime(0.3, audioContext.currentTime);
+                        gain2.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.5);
+                        osc2.start(audioContext.currentTime); osc2.stop(audioContext.currentTime + 0.5);
+                    }, 600);
+                } catch (e) { console.log('No se pudo reproducir sonido:', e); }
+            }
+
+            function mostrarNotificacionFirestore(alerta, alertaId) {
+                const probabilidad = ((alerta.confianza || alerta.probabilidad || 0) * 100).toFixed(1);
+                const fecha = alerta.hora_caida
+                    ? (alerta.hora_caida.toDate ? alerta.hora_caida.toDate().toLocaleString('es-ES') : new Date().toLocaleString('es-ES'))
+                    : new Date().toLocaleString('es-ES');
+                const notif = document.createElement('div');
+                notif.className = 'alert alert-danger alert-dismissible fade show position-fixed top-0 end-0 m-3';
+                notif.style.zIndex = '9999'; notif.style.minWidth = '400px'; notif.style.boxShadow = '0 6px 20px rgba(0,0,0,0.4)'; notif.style.animation = 'shake 0.5s';
+                notif.innerHTML = `
+                    <h5 class="alert-heading mb-2"><i class="fas fa-exclamation-triangle"></i> ¡CAÍDA DETECTADA!</h5>
+                    <p class="mb-2">
+                        <strong>Confianza:</strong> <span class="badge bg-danger">${probabilidad}%</span><br>
+                        <strong>Hora:</strong> ${fecha}<br>
+                        <strong>ID:</strong> <code class="small">${alertaId}</code>
+                    </p>
+                    <hr>
+                    <p class="mb-0 small">
+                        ${alerta.cadera_ax !== undefined ? `
+                            <strong>📍 Cadera:</strong> ax=${alerta.cadera_ax?.toFixed(3)}, ay=${alerta.cadera_ay?.toFixed(3)}, az=${alerta.cadera_az?.toFixed(3)}<br>
+                            <strong>📍 Pierna:</strong> ax=${alerta.pierna_ax?.toFixed(3)}, ay=${alerta.pierna_ay?.toFixed(3)}, az=${alerta.pierna_az?.toFixed(3)}
+                        ` : `<em>${alerta.tipo || 'Caída detectada'}</em>`}
+                    </p>
+                    <button type="button" class="btn-close" data-bs-dismiss="alert"></button>`;
+                document.body.appendChild(notif);
+                setTimeout(() => notif.remove(), 15000);
+                if ('Notification' in window && Notification.permission === 'granted') {
+                    new Notification('⚠️ Caída detectada', {
+                        body: `Confianza: ${probabilidad}% - ${fecha}`,
+                        icon: '/favicon.ico',
+                        tag: 'fall-' + alertaId,
+                        requireInteraction: true
+                    });
+                }
+            }
+
+            // CSS animación shake
+            const styleShake = document.createElement('style');
+            styleShake.textContent = `@keyframes shake{0%,100%{transform:translateX(0)}10%,30%,50%,70%,90%{transform:translateX(-10px)}20%,40%,60%,80%{transform:translateX(10px)}}`;
+            document.head.appendChild(styleShake);
+
+            if ('Notification' in window && Notification.permission === 'default') {
+                Notification.requestPermission().then(perm => console.log('Permiso notificaciones:', perm));
+            }
+
+            function iniciarEscuchadorFirestore() {
+                console.log('✅ Iniciando listener de Firestore...');
+                db.collection('Historial')
+                  .doc('Personas')
+                  .collection(PERSONA)
+                  .orderBy('hora_caida', 'desc')
+                  .limit(20)
+                  .onSnapshot((snapshot) => {
+                        console.log('📡 Snapshot recibido:', { size: snapshot.size, primeraVez, changes: snapshot.docChanges().map(c => ({type: c.type, id: c.doc.id})) });
+                        snapshot.docChanges().forEach(async (change) => {
+                            const alerta = change.doc.data();
+                            const alertaId = change.doc.id;
+                            if (change.type !== 'added') return; // Solo nuevos
+                            if (primeraVez) { console.log('⏭️  Ignorando carga inicial'); return; } // Evitar carga inicial
+                            if (procesados.has(alertaId)) return; // Evitar duplicado en sesión
+                            procesados.add(alertaId);
+                            if (alerta.mensaje_enviado) { console.log('ℹ️ Ya enviado. Omitiendo', alertaId); return; }
+
+                            console.log('🚨 Nueva alerta detectada:', alertaId, alerta);
+                            mostrarNotificacionFirestore(alerta, alertaId);
+                            reproducirSonidoAlerta();
+                            loadHistory();
+
+                            const envio = await enviarWhatsAppAlerta(alerta, alertaId);
+                            try {
+                                if (envio.status === 'sent') {
+                                    await change.doc.ref.update({
+                                        estado: 'Enviada',
+                                        mensaje_enviado: true,
+                                        hora_envio: firebase.firestore.Timestamp.now()
+                                    });
+                                } else if (envio.status === 'error') {
+                                    await change.doc.ref.update({
+                                        estado: 'Error al enviar',
+                                        mensaje_enviado: false,
+                                        error_envio: envio.message || 'No se pudo enviar WhatsApp automáticamente'
+                                    });
+                                } else if (envio.status === 'rate-limited') {
+                                    console.log('ℹ️ Envío omitido por rate limit (no se marca como error)');
+                                }
+                            } catch (e) { console.error('❌ Error actualizando documento:', e); }
+                        });
+                        primeraVez = false;
+                  }, (error) => {
+                      console.error('❌ Error en listener:', error);
+                  });
+                console.log('✅ Listener activo - esperando alertas...');
+            }
+
+            iniciarEscuchadorFirestore();
+        })();
