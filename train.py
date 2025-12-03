@@ -21,30 +21,43 @@ OVERLAP = 20
 TEST_SIZE = 0.2
 EPOCHS = 30
 BATCH_SIZE = 16
+CSV_PATH = "datos.csv"  # Archivo CSV unificado con columnas: cadera_ax,...,cadera_gz,pierna_ax,...,pierna_gz,state
 
 # --- CARGA DE DATOS ---
-caidas = pd.read_csv("Codigos_raspberry\datos_capturados\datos_capturados_caidas (1).csv")
-normales = pd.read_csv("Codigos_raspberry\datos_capturados\datos_capturados_normales.csv")
+print(f"📂 Leyendo dataset: {CSV_PATH}")
+df = pd.read_csv(CSV_PATH)
+print(f"   Filas: {len(df)}, Columnas: {df.columns.tolist()}")
 
-# Convertir a numpy
-X_caidas = caidas.values
-X_normales = normales.values
+# Extraer características (primeras 12 columnas) y etiquetas (última columna 'state')
+feature_cols = df.columns[:-1].tolist()  # Todas menos la última
+label_col = df.columns[-1]  # Última columna (state)
 
-# Función para crear ventanas
-def crear_ventanas(data, etiqueta):
-    ventanas, labels = [], []
-    for i in range(0, len(data) - WINDOW_SIZE, OVERLAP):
-        ventana = data[i:i+WINDOW_SIZE]
+X_data = df[feature_cols].values  # Array (n_samples, 12)
+y_data = df[label_col].values  # Array (n_samples,)
+
+print(f"   Features shape: {X_data.shape}")
+print(f"   Labels shape: {y_data.shape}")
+print(f"   Distribución: {np.bincount(y_data.astype(int))}")
+
+# Función para crear ventanas deslizantes con overlap
+def crear_ventanas(data, labels, window_size, overlap):
+    """Crea ventanas deslizantes de datos con etiquetas correspondientes."""
+    ventanas, window_labels = [], []
+    stride = window_size - overlap
+    for i in range(0, len(data) - window_size + 1, stride):
+        ventana = data[i:i+window_size]
+        # Usar la etiqueta más frecuente en la ventana como etiqueta de la ventana
+        etiqueta = int(np.median(labels[i:i+window_size]))
         ventanas.append(ventana)
-        labels.append(etiqueta)
-    return np.array(ventanas), np.array(labels)
+        window_labels.append(etiqueta)
+    return np.array(ventanas), np.array(window_labels)
 
-Xc, yc = crear_ventanas(X_caidas, 1)
-Xn, yn = crear_ventanas(X_normales, 0)
-
-# Concatenar
-X = np.concatenate([Xc, Xn], axis=0)
-y = np.concatenate([yc, yn], axis=0)
+# Crear ventanas desde los datos completos
+X, y = crear_ventanas(X_data, y_data, WINDOW_SIZE, OVERLAP)
+print(f"\n📊 Después de crear ventanas:")
+print(f"   X shape: {X.shape}")
+print(f"   y shape: {y.shape}")
+print(f"   Distribución: {np.bincount(y)}")
 
 # Split
 X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=TEST_SIZE, random_state=42)
@@ -81,6 +94,40 @@ cm = confusion_matrix(y_test, y_pred)
 print("Matriz de confusión:")
 print(cm)
 
-#Perdidas y precisión
+# Gráficos de pérdida y precisión
 plt.figure(figsize=(12, 4))
 plt.subplot(1, 2, 1)
+plt.plot(history.history['loss'], label='Train Loss')
+plt.plot(history.history['val_loss'], label='Val Loss')
+plt.xlabel('Epoch')
+plt.ylabel('Loss')
+plt.legend()
+plt.title('Pérdida')
+
+plt.subplot(1, 2, 2)
+plt.plot(history.history['accuracy'], label='Train Accuracy')
+plt.plot(history.history['val_accuracy'], label='Val Accuracy')
+plt.xlabel('Epoch')
+plt.ylabel('Accuracy')
+plt.legend()
+plt.title('Precisión')
+plt.tight_layout()
+plt.savefig('training_history.png')
+print("\n📈 Gráfico guardado en: training_history.png")
+
+# Mostrar matriz de confusión
+plt.figure(figsize=(6, 5))
+plt.imshow(cm, interpolation='nearest', cmap=plt.cm.Blues)
+plt.title('Matriz de Confusión')
+plt.colorbar()
+tick_marks = np.arange(2)
+plt.xticks(tick_marks, ['No Caída', 'Caída'])
+plt.yticks(tick_marks, ['No Caída', 'Caída'])
+plt.ylabel('Verdadero')
+plt.xlabel('Predicho')
+for i in range(2):
+    for j in range(2):
+        plt.text(j, i, str(cm[i, j]), ha="center", va="center", color="white" if cm[i, j] > cm.max()/2 else "black")
+plt.tight_layout()
+plt.savefig('confusion_matrix.png')
+print("📊 Matriz de confusión guardada en: confusion_matrix.png\n")
