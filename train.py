@@ -119,9 +119,9 @@ sns.heatmap(cm, annot=True, fmt='d', cmap='Blues',
             yticklabels=['Normal','Caída'])
 plt.title("Matriz de Confusión")
 plt.tight_layout()
-plt.savefig("matriz_confusion_arduino.png", dpi=150)
+plt.savefig("confusion_matrix.png", dpi=150)
 
-print("💾 Matriz guardada: matriz_confusion_arduino.png")
+print("💾 Matriz guardada: confusion_matrix.png")
 
 # Reporte
 print("\n📋 Reporte de clasificación:")
@@ -147,7 +147,7 @@ plt.title("Precisión")
 plt.legend(['Train','Val'])
 
 plt.tight_layout()
-plt.savefig("entrenamiento_arduino.png", dpi=150)
-print("\n💾 Guardado: entrenamiento_arduino.png")
+plt.savefig("training_metrics.png", dpi=150)
+print("\n💾 Guardado: training_metrics.png")
 
 print("\n✅ ENTRENAMIENTO COMPLETADO\n")

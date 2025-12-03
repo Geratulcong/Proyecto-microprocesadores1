@@ -102,24 +102,6 @@ def fetch_config_from_firestore():
         print(f"ℹ️ Error obteniendo config Firestore: {e}")
         return None, None
 
-    try:
-        payload = {"phone": phone, "apiCode": apikey, "message": message}
-        print(f"📱 Enviando WhatsApp vía servidor: {SERVER_ALERT_URL} …")
-        r = requests.post(SERVER_ALERT_URL, json=payload, timeout=6)
-        data = {}
-        try:
-            data = r.json()
-        except Exception:
-            pass
-        if r.status_code == 200 and data.get("status") == "ok":
-            print("✅ WhatsApp enviado correctamente")
-            return True
-        else:
-            print(f"❌ Error al enviar WhatsApp: {data.get('message') or r.text[:200]}")
-            return False
-    except requests.exceptions.RequestException as e:
-        print(f"❌ Error de red al enviar WhatsApp: {e}")
-        return False
 
 def actualizar_estado_documento(doc_id: str, enviado: bool, error_msg: str | None = None):
     """Actualiza el documento en Firestore con el estado del envío de WhatsApp."""
@@ -194,7 +176,7 @@ async def find_devices():
             print(f"✅ Encontrado PIERNA: {device.name} ({device.address})")
     
     if not cadera_addr or not pierna_addr:
-        raise Exception(f"❌ No se encontraron ambos dispositivos")
+        raise Exception(f"No se encontraron ambos dispositivos")
     
     return cadera_addr, pierna_addr
 
@@ -283,11 +265,11 @@ def enviar_a_firestore(probabilidad, datos_cadera, datos_pierna):
             porcentaje = f"{float(probabilidad)*100:.1f}%"
             fecha_local = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
             mensaje = (
-                "🚨 ALERTA DE CAÍDA DETECTADA\n\n"
-                f"👤 Persona: Vicente\n"
-                f"📅 Fecha: {fecha_local}\n"
-                f"🎯 Confianza: {porcentaje}\n"
-                f"🆔 ID: {doc_id}\n\n"
+                "ALERTA DE CAÍDA DETECTADA\n\n"
+                f"Persona: Vicente\n"
+                f"Fecha: {fecha_local}\n"
+                f"Confianza: {porcentaje}\n"
+                f"ID: {doc_id}\n\n"
                 "Verifica el estado de la persona inmediatamente."
             )
 
@@ -299,15 +281,15 @@ def enviar_a_firestore(probabilidad, datos_cadera, datos_pierna):
 
             return True
         else:
-            print(f"   ❌ Error Firestore: {response.status_code}")
+            print(f"   Error Firestore: {response.status_code}")
             print(f"   Respuesta: {response.text[:200]}")
             return False
             
     except requests.exceptions.Timeout:
-        print(f"   ⏱️ Timeout al conectar con Firestore")
+        print(f"   Timeout al conectar con Firestore")
         return False
     except Exception as e:
-        print(f"   ❌ Error enviando a Firebase: {e}")
+        print(f"   Error enviando a Firebase: {e}")
         return False
 
 # --- PREDECIR CAÍDA ---
