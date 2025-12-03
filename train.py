@@ -35,6 +35,13 @@ df["state"] = pd.to_numeric(df["state"], errors='coerce').astype("Int64")
 
 #NaN
 df = df.dropna()
+# 💥 AUMENTAR PESO DEL GIROSCOPIO DE LA PIERNA CUANDO STATE = 1
+mask_caidas = df["state"] == 1
+df.loc[mask_caidas, ["pierna_gx", "pierna_gy", "pierna_gz"]] *= 6
+
+data = df[FEATURE_COLS].astype(float).values
+labels = df["state"].astype(int).values
+
 data = df[FEATURE_COLS].astype(float).values
 labels = df["state"].astype(int).values
 
