@@ -18,7 +18,7 @@ DATOS_DIR = Path(__file__).parent / "datos_limpios"
 WINDOW_SIZE = 40  # 40 muestras = 2 segundos a 20Hz
 OVERLAP = 20  # Solapamiento de ventanas (50%)
 TEST_SIZE = 0.2
-EPOCHS = 50
+EPOCHS = 25
 BATCH_SIZE = 16
 
 print("╔════════════════════════════════════════════════╗")
@@ -206,7 +206,7 @@ print("\n📋 Reporte de clasificación:")
 print(classification_report(y_test, y_pred, target_names=['Normal', 'Caída']))
 
 # --- 6. GUARDAR MODELO ---
-MODEL_PATH = "modelo_caidas_arduino.h5"
+MODEL_PATH = "modelo_cnn_imu.h5"
 model.save(MODEL_PATH)
 print(f"\n💾 Modelo guardado: {MODEL_PATH}")
 
