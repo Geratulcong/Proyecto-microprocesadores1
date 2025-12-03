@@ -199,3 +199,7 @@ plt.tight_layout()
 plt.savefig('confusion_matrix.png', dpi=100)
 print("✅ Matriz de confusión guardada: confusion_matrix.png\n")
 plt.close()
+
+
+model.save("modelo_cnn_imu.h5")
+print("Modelo guardado como modelo_cnn_imu.h5")
