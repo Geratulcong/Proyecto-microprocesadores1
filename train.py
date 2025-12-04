@@ -15,8 +15,8 @@ import seaborn as sns
 
 # --- CONFIGURACIÓN ---
 DATOS_DIR = Path(__file__).parent / "datos_limpios"
-WINDOW_SIZE = 40  # 40 muestras = 2 segundos a 20Hz
-OVERLAP = 20  # Solapamiento de ventanas (50%)
+WINDOW_SIZE = 100  # 80 muestras = 2 segundos a 40Hz
+OVERLAP = 50 
 TEST_SIZE = 0.2
 EPOCHS = 15
 BATCH_SIZE = 16
@@ -64,8 +64,14 @@ for ruta, etiqueta in archivos:
 
     # Escalar giroscopio
     cols_giro = [c for c in cols if 'gx' in c or 'gy' in c or 'gz' in c]
-    df[cols_giro] = df[cols_giro] * 1.0
+    df[cols_giro] = df[cols_giro] * 4.0
     print(f"   → Giroscopio escalado x1: {cols_giro}")
+
+    FACTOR_CADERA = 1.0
+
+    cols_cadera = [c for c in cols if 'cadera_' in c]
+    df[cols_cadera] = df[cols_cadera] * FACTOR_CADERA
+    print(f"   → Peso aplicado a cadera: {FACTOR_CADERA}x")
 
     # Crear ventanas
     ventanas_creadas = 0
