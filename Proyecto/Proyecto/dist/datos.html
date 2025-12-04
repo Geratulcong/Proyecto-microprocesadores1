@@ -248,7 +248,7 @@
                 <td>${i + 1}</td>
                 <td>
                     <strong>${fecha}</strong><br>
-                    <small class="text-muted">📍 ${ubicacion} | 🎯 ${confianza}</small>
+                    <small class="text-muted"> ${ubicacion} |  ${confianza}</small>
                 </td>
                 <td>
                     <span class="badge ${estadoClass}">${estado}</span><br>
@@ -385,7 +385,7 @@
                         const probabilidad = ((alerta.confianza || alerta.probabilidad || 0) * 100).toFixed(1);
                         const fecha = alerta.hora_caida ? (alerta.hora_caida.toDate ? alerta.hora_caida.toDate().toLocaleString('es-ES') : new Date().toLocaleString('es-ES')) : new Date().toLocaleString('es-ES');
 
-                        const mensaje = `🚨 ALERTA DE CAÍDA DETECTADA\n\n` + `👤 Persona: Vicente\n` + `📅 Fecha: ${fecha}\n` + `🎯 Confianza: ${probabilidad}%\n` + `🆔 ID: ${alertaId}\n` + `${alerta.ubicacion ? `📍 Ubicación: ${alerta.ubicacion}\n` : ''}` + `\nVerifica el estado de la persona inmediatamente.`;
+                        const mensaje = `🚨 ALERTA DE CAÍDA DETECTADA\n\n` + `👤 Persona: Vicente\n` + `📅 Fecha: ${fecha}\n` + ` Confianza: ${probabilidad}%\n` + `🆔 ID: ${alertaId}\n` + `${alerta.ubicacion ? ` Ubicación: ${alerta.ubicacion}\n` : ''}` + `\nVerifica el estado de la persona inmediatamente.`;
 
                         console.log('📱 Enviando WhatsApp vía servidor local...');
                         const res = await fetch('http://localhost:5000/send-alert', {
@@ -459,8 +459,8 @@
                 ${
                     alerta.cadera_ax !== undefined
                         ? `
-                    <strong>📍 Cadera:</strong> ax=${alerta.cadera_ax?.toFixed(3)}, ay=${alerta.cadera_ay?.toFixed(3)}, az=${alerta.cadera_az?.toFixed(3)}<br>
-                    <strong>📍 Pierna:</strong> ax=${alerta.pierna_ax?.toFixed(3)}, ay=${alerta.pierna_ay?.toFixed(3)}, az=${alerta.pierna_az?.toFixed(3)}
+                    <strong> Cadera:</strong> ax=${alerta.cadera_ax?.toFixed(3)}, ay=${alerta.cadera_ay?.toFixed(3)}, az=${alerta.cadera_az?.toFixed(3)}<br>
+                    <strong> Pierna:</strong> ax=${alerta.pierna_ax?.toFixed(3)}, ay=${alerta.pierna_ay?.toFixed(3)}, az=${alerta.pierna_az?.toFixed(3)}
                 `
                         : `<em>${alerta.tipo || 'Caída detectada'}</em>`
                 }

@@ -74,7 +74,7 @@ try:
         
         print("✅ ¡Alerta enviada exitosamente!")
         print(f"   🔑 ID del documento: {doc_id}")
-        print(f"   📍 Ruta completa: {doc_path}")
+        print(f"    Ruta completa: {doc_path}")
         print(f"\n🔗 Ver en Firebase Console:")
         print(f"   https://console.firebase.google.com/project/detector-de-caidas-360/firestore/databases/-default-/data/~2FHistorial~2FPersonas~2FVicente~2F{doc_id}")
         

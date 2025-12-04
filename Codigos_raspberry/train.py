@@ -84,15 +84,15 @@ for archivo in archivos:
                 'cadera_ax', 'cadera_ay', 'cadera_az', 'cadera_gx', 'cadera_gy', 'cadera_gz',
                 'pierna_ax', 'pierna_ay', 'pierna_az', 'pierna_gx', 'pierna_gy', 'pierna_gz'
             ]
-            print(f"   📍 Usando datos de CADERA + PIERNA (12 features)")
+            print(f"    Usando datos de CADERA + PIERNA (12 features)")
         elif 'cadera_ax' in columnas:
             # Usar solo datos de la cadera
             cols = ['cadera_ax', 'cadera_ay', 'cadera_az', 'cadera_gx', 'cadera_gy', 'cadera_gz']
-            print(f"   📍 Usando datos del sensor de CADERA (6 features)")
+            print(f"    Usando datos del sensor de CADERA (6 features)")
         elif 'ax' in columnas:
             # Usar datos directos
             cols = ['ax', 'ay', 'az', 'gx', 'gy', 'gz']
-            print(f"   📍 Usando datos del sensor único (6 features)")
+            print(f"    Usando datos del sensor único (6 features)")
         else:
             print(f"   ❌ Error: Columnas no reconocidas: {columnas}")
             continue
