@@ -64,8 +64,8 @@ for ruta, etiqueta in archivos:
 
     # Escalar giroscopio
     cols_giro = [c for c in cols if 'gx' in c or 'gy' in c or 'gz' in c]
-    df[cols_giro] = df[cols_giro] * 4.0
-    print(f"   → Giroscopio escalado x4: {cols_giro}")
+    df[cols_giro] = df[cols_giro] * 1.0
+    print(f"   → Giroscopio escalado x1: {cols_giro}")
 
     # Crear ventanas
     ventanas_creadas = 0
