@@ -93,13 +93,13 @@ def fetch_config_from_firestore():
             if apiCode:
                 apiCode = str(apiCode)
             _CONFIG_CACHE.update({"phone": phone, "apiCode": apiCode, "ts": now})
-            print("⚙️  Config de WhatsApp cargada desde Firestore")
+            print(" Config de WhatsApp cargada desde Firestore")
             return phone, apiCode
         else:
-            print(f"ℹ️ No se pudo obtener config Firestore ({r.status_code})")
+            print(f"ℹ No se pudo obtener config Firestore ({r.status_code})")
             return None, None
     except Exception as e:
-        print(f"ℹ️ Error obteniendo config Firestore: {e}")
+        print(f"ℹ Error obteniendo config Firestore: {e}")
         return None, None
 
 
@@ -120,11 +120,11 @@ def actualizar_estado_documento(doc_id: str, enviado: bool, error_msg: str | Non
 
         r = requests.patch(url, json=body, timeout=5)
         if r.status_code == 200:
-            print("📝 Documento actualizado con estado de envío")
+            print("Documento actualizado con estado de envío")
         else:
-            print(f"⚠️  No se pudo actualizar el documento: {r.status_code} - {r.text[:200]}")
+            print(f" No se pudo actualizar el documento: {r.status_code} - {r.text[:200]}")
     except Exception as e:
-        print(f"⚠️  Error actualizando documento: {e}")
+        print(f"Error actualizando documento: {e}")
 
 # --- VARIABLES GLOBALES ---
 datos_cadera = {"ax": 0, "ay": 0, "az": 0, "gx": 0, "gy": 0, "gz": 0}
@@ -136,14 +136,6 @@ ultima_alerta = 0  # Timestamp de la última alerta enviada
 ventana = deque(maxlen=WINDOW_SIZE)
 modelo = None
 
-print("╔════════════════════════════════════════════════╗")
-print("║   Detector de Caídas - Dual BLE + CNN        ║")
-print("║   + Alertas Firestore                         ║")
-print("╚════════════════════════════════════════════════╝")
-print(f"📍 Firestore: Historial/Personas/Vicente")
-print(f"⏱️  Cooldown alertas: {COOLDOWN_ALERTAS}s")
-print(f"🎯 Umbral detección: {UMBRAL_CAIDA*100:.0f}%\n")
-
 # --- CARGAR MODELO ---
 def cargar_modelo():
     """Carga el modelo CNN entrenado"""
@@ -151,17 +143,17 @@ def cargar_modelo():
     try:
         modelo = keras.models.load_model(MODEL_PATH)
         num_features = modelo.input_shape[2]
-        print(f"✅ Modelo cargado: {MODEL_PATH}")
-        print(f"   📊 Entrada: (batch, {WINDOW_SIZE}, {num_features})")
+        print(f" Modelo cargado: {MODEL_PATH}")
+        print(f" Entrada: (batch, {WINDOW_SIZE}, {num_features})")
         return num_features
     except Exception as e:
-        print(f"❌ Error cargando modelo: {e}")
+        print(f"Error cargando modelo: {e}")
         exit(1)
 
 # --- BUSCAR DISPOSITIVOS ---
 async def find_devices():
     """Busca ambos Arduinos y retorna sus direcciones"""
-    print("🔍 Buscando dispositivos BLE...")
+    print("Buscando dispositivos BLE...")
     devices = await BleakScanner.discover(timeout=10.0)
     
     cadera_addr = None
@@ -170,10 +162,10 @@ async def find_devices():
     for device in devices:
         if device.name == DEVICE_CADERA:
             cadera_addr = device.address
-            print(f"✅ Encontrado CADERA: {device.name} ({device.address})")
+            print(f"Encontrado CADERA: {device.name} ({device.address})")
         elif device.name == DEVICE_PIERNA:
             pierna_addr = device.address
-            print(f"✅ Encontrado PIERNA: {device.name} ({device.address})")
+            print(f"Encontrado PIERNA: {device.name} ({device.address})")
     
     if not cadera_addr or not pierna_addr:
         raise Exception(f"No se encontraron ambos dispositivos")
@@ -192,7 +184,7 @@ def handler_cadera(sender, data):
             "gx": lectura["gx"], "gy": lectura["gy"], "gz": lectura["gz"]
         }
     except Exception as e:
-        print(f"⚠️ Error en cadera: {e}")
+        print(f"Error en cadera: {e}")
 
 def handler_pierna(sender, data):
     """Maneja datos del sensor de pierna"""
@@ -205,7 +197,7 @@ def handler_pierna(sender, data):
             "gx": lectura["gx"], "gy": lectura["gy"], "gz": lectura["gz"]
         }
     except Exception as e:
-        print(f"⚠️ Error en pierna: {e}")
+        print(f"Error en pierna: {e}")
 
 # --- ENVIAR ALERTA A FIRESTORE ---
 def enviar_a_firestore(probabilidad, datos_cadera, datos_pierna):
@@ -257,9 +249,9 @@ def enviar_a_firestore(probabilidad, datos_cadera, datos_pierna):
             ultima_alerta = tiempo_actual
             doc_data = response.json()
             doc_id = doc_data.get('name', '').split('/')[-1]
-            print(f"   ✅ Alerta enviada a Firestore")
-            print(f"   🔗 ID: {doc_id}")
-            print(f"   📍 Ruta: Historial/Personas/Vicente/{doc_id}")
+            print(f"   Alerta enviada a Firestore")
+            print(f"   ID: {doc_id}")
+            print(f"   Ruta: Historial/Personas/Vicente/{doc_id}")
 
             # Componer mensaje WhatsApp
             porcentaje = f"{float(probabilidad)*100:.1f}%"
@@ -313,7 +305,7 @@ async def detectar_caidas():
     """Detecta caídas en tiempo real sin guardar CSV"""
     global contador, ventana
     
-    print("\n📡 Iniciando detección en tiempo real...")
+    print("\nIniciando detección en tiempo real...")
     print("─" * 120)
     print(f"{'Seq':<6} {'Cadera (ax,ay,az | gx,gy,gz)':<55} {'Pierna (ax,ay,az | gx,gy,gz)':<40} {'Estado':<15}")
     print("─" * 120)
@@ -334,17 +326,17 @@ async def detectar_caidas():
         ventana.append(muestra)
         
         # Predecir cada 5 muestras
-        estado = "⚪ Normal"
+        estado = "No iniciado"
         if contador % 5 == 0:
             prob_caida = predecir_caida()
             
             if prob_caida is not None:
                 if prob_caida > UMBRAL_CAIDA:
-                    estado = f"🔴 CAÍDA ({prob_caida*100:.1f}%)"
+                    estado = f"CAÍDA ({prob_caida*100:.1f}%)"
                     # Enviar a Firestore con cooldown de 5 segundos
                     enviar_a_firestore(prob_caida, datos_cadera, datos_pierna)
                 else:
-                    estado = f"✅ OK ({prob_caida*100:.1f}%)"
+                    estado = f"OK ({prob_caida*100:.1f}%)"
             
             print(f"{contador:<6} "
                   f"({datos_cadera['ax']:6.3f},{datos_cadera['ay']:6.3f},{datos_cadera['az']:6.3f} | "
@@ -398,7 +390,7 @@ async def main_loop():
             print("\n\n🚪 Detenido por el usuario")
             break
         except Exception as e:
-            print(f"\n\n❌ Error: {e}")
+            print(f"\n\n Error: {e}")
             print(f"🔄 Reintentando en {retry_delay} segundos...")
             await asyncio.sleep(retry_delay)
 
@@ -408,10 +400,10 @@ if __name__ == "__main__":
     num_features = cargar_modelo()
     
     if num_features != 12:
-        print(f"⚠️ ADVERTENCIA: El modelo espera {num_features} features, pero enviamos 12")
+        print(f"El modelo espera {num_features} features, pero enviamos 12")
         print(f"   Entrena el modelo con datos de 12 columnas (cadera + pierna)")
     
     try:
         asyncio.run(main_loop())
     except KeyboardInterrupt:
-        print("\n👋 Programa finalizado")
+        print("\n Exit")

@@ -18,102 +18,65 @@ DATOS_DIR = Path(__file__).parent / "datos_limpios"
 WINDOW_SIZE = 40  # 40 muestras = 2 segundos a 20Hz
 OVERLAP = 20  # Solapamiento de ventanas (50%)
 TEST_SIZE = 0.2
-EPOCHS = 25
+EPOCHS = 15
 BATCH_SIZE = 16
 
 
-# --- 1. CARGAR DATOS ---
-print("📂 Buscando archivos en:", DATOS_DIR)
+# Rutas absolutas (AJUSTA ESTO A TU INSTALACIÓN)
+RUTA_NORMAL = Path("/home/runner/work/Proyecto-microprocesadores1/Proyecto-microprocesadores1/Codigos_raspberry/datos_limpios/datos_capturados_normales.csv")
+RUTA_CAIDA  = Path("/home/runner/work/Proyecto-microprocesadores1/Proyecto-microprocesadores1/Codigos_raspberry/datos_limpios/datos_capturados_caidas.csv")
 
-if not DATOS_DIR.exists():
-    print(f"❌ Error: Ejecuta primero 'limpiar_datos.py'")
-    exit(1)
+archivos = [
+    (RUTA_NORMAL, 0),   # etiqueta 0 → NORMAL
+    (RUTA_CAIDA,  1)    # etiqueta 1 → CAÍDA
+]
 
-# Buscar archivos CSV
-archivos_csv = list(DATOS_DIR.glob("*.csv"))
-archivos_txt = list(DATOS_DIR.glob("*.txt"))
-archivos = archivos_csv if archivos_csv else archivos_txt
-
-if not archivos:
-    print(f"❌ No se encontraron archivos .csv o .txt en '{DATOS_DIR}'")
-    exit(1)
-
-print(f"📄 Archivos encontrados: {len(archivos)}\n")
-
-# Clasificar archivos automáticamente según su nombre
 datos_totales = []
 etiquetas_totales = []
 
-for archivo in archivos:
-    print(f"📄 {archivo.name}")
-    
-    # Detectar automáticamente si es caída o normal por el nombre
-    nombre_lower = archivo.name.lower()
-    if 'caida' in nombre_lower or 'fall' in nombre_lower:
-        etiqueta = 1
-        tipo = "CAÍDA"
-    elif 'normal' in nombre_lower or 'adl' in nombre_lower:
-        etiqueta = 0
-        tipo = "NORMAL"
+print("📂 Cargando archivos fijos...")
+
+for ruta, etiqueta in archivos:
+    print(f"\n📄 Archivo: {ruta.name}  → Etiqueta: {etiqueta}")
+
+    if not ruta.exists():
+        print(f"❌ ERROR: No existe el archivo: {ruta}")
+        exit(1)
+
+    # Cargar CSV
+    df = pd.read_csv(ruta)
+    columnas = df.columns.tolist()
+
+    # Detectar columnas disponibles
+    if 'cadera_ax' in columnas and 'pierna_ax' in columnas:
+        cols = [
+            'cadera_ax','cadera_ay','cadera_az','cadera_gx','cadera_gy','cadera_gz',
+            'pierna_ax','pierna_ay','pierna_az','pierna_gx','pierna_gy','pierna_gz'
+        ]
+        print("   → Usando datos de CADERA + PIERNA (12 features)")
+    elif 'cadera_ax' in columnas:
+        cols = ['cadera_ax','cadera_ay','cadera_az','cadera_gx','cadera_gy','cadera_gz']
+        print("   → Usando datos del sensor CADERA (6 features)")
     else:
-        # Si no se detecta automáticamente, preguntar
-        while True:
-            resp = input("   Etiqueta (0=normal, 1=caída): ").strip()
-            if resp in ['0', '1']:
-                etiqueta = int(resp)
-                tipo = "NORMAL" if etiqueta == 0 else "CAÍDA"
-                break
-            print("   ❌ Valor inválido. Usa 0 o 1")
-    
-    print(f"   🏷️  Clasificado como: {tipo}")
-    
-    # Cargar archivo
-    try:
-        df = pd.read_csv(archivo)
-        
-        # Detectar columnas disponibles
-        columnas = df.columns.tolist()
-        
-        # Seleccionar columnas según lo disponible
-        if 'cadera_ax' in columnas and 'pierna_ax' in columnas:
-            # Usar datos de AMBOS sensores (12 features)
-            cols = [
-                'cadera_ax', 'cadera_ay', 'cadera_az', 'cadera_gx', 'cadera_gy', 'cadera_gz',
-                'pierna_ax', 'pierna_ay', 'pierna_az', 'pierna_gx', 'pierna_gy', 'pierna_gz'
-            ]
-            print(f"    Usando datos de CADERA + PIERNA (12 features)")
-        elif 'cadera_ax' in columnas:
-            # Usar solo datos de la cadera
-            cols = ['cadera_ax', 'cadera_ay', 'cadera_az', 'cadera_gx', 'cadera_gy', 'cadera_gz']
-            print(f"    Usando datos del sensor de CADERA (6 features)")
-        elif 'ax' in columnas:
-            # Usar datos directos
-            cols = ['ax', 'ay', 'az', 'gx', 'gy', 'gz']
-            print(f"    Usando datos del sensor único (6 features)")
-        else:
-            print(f"   ❌ Error: Columnas no reconocidas: {columnas}")
-            continue
-        
-        print(f"   ✅ Cargado: {len(df)} muestras")
-        
-        # Escalar giroscopio x4 para darle más peso
-        cols_giro = [c for c in cols if 'gx' in c or 'gy' in c or 'gz' in c]
-        if cols_giro:
-            df[cols_giro] = df[cols_giro] * 4.0
-            print(f"   ⚙️  Giroscopio escalado x4: {cols_giro}")
-        
-        # Crear ventanas con solapamiento
-        ventanas_creadas = 0
-        for i in range(0, len(df) - WINDOW_SIZE + 1, OVERLAP):
-            ventana = df.iloc[i:i+WINDOW_SIZE][cols].values
-            datos_totales.append(ventana)
-            etiquetas_totales.append(etiqueta)
-            ventanas_creadas += 1
-        
-        print(f"   📊 Ventanas creadas: {ventanas_creadas}\n")
-    
-    except Exception as e:
-        print(f"   ❌ Error: {e}\n")
+        cols = ['ax','ay','az','gx','gy','gz']
+        print("   → Usando sensor único (6 features)")
+
+    print(f"   → Total muestras: {len(df)}")
+
+    # Escalar giroscopio
+    cols_giro = [c for c in cols if 'gx' in c or 'gy' in c or 'gz' in c]
+    df[cols_giro] = df[cols_giro] * 4.0
+    print(f"   → Giroscopio escalado x4: {cols_giro}")
+
+    # Crear ventanas
+    ventanas_creadas = 0
+    for i in range(0, len(df) - WINDOW_SIZE + 1, OVERLAP):
+        ventana = df.iloc[i:i+WINDOW_SIZE][cols].values
+        datos_totales.append(ventana)
+        etiquetas_totales.append(etiqueta)
+        ventanas_creadas += 1
+
+    print(f"   → Ventanas creadas: {ventanas_creadas}")
 
 # Convertir a arrays
 X = np.array(datos_totales, dtype=np.float32)
