@@ -44,5 +44,6 @@ jobs:
       uses: actions/upload-artifact@v4
       with:
         name: training-dataset
-        path: datos.csv
+        path: Codigos_raspberry/datos_limpios/datos_capturados_normales.csv,Codigos_raspberry/datos_limpios/datos_capturados_caidas.csv
+        
         retention-days: 30
