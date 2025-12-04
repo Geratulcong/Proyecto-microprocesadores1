@@ -22,9 +22,8 @@ EPOCHS = 15
 BATCH_SIZE = 16
 
 
-# Rutas absolutas (AJUSTA ESTO A TU INSTALACIÓN)
-RUTA_NORMAL = Path("Codigos_raspberry\datos_limpios\datos_capturados_normales.csv")
-RUTA_CAIDA  = Path("Codigos_raspberry\datos_limpios\datos_capturados_caidas (1).csv")
+RUTA_NORMAL = Path("Codigos_raspberry/datos_limpios/datos_capturados_normales.csv")
+RUTA_CAIDA  = Path("Codigos_raspberry/datos_limpios/datos_capturados_caidas (1).csv")
 
 archivos = [
     (RUTA_NORMAL, 0),   # etiqueta 0 → NORMAL
