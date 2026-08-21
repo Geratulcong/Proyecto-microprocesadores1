@@ -12,6 +12,12 @@ BLECharacteristic sensorCharacteristic(deviceServiceCharacteristicUuid, BLERead 
 float ax, ay, az;
 float gx, gy, gz;
 char jsonBuffer[256];
+ 
+ // Botón de alerta manual
+ const int BUTTON_PIN = 2; // usar pin digital 2
+ bool lastButtonState = HIGH; // INPUT_PULLUP -> HIGH = no presionado
+ unsigned long lastDebounceTime = 0;
+ const unsigned long DEBOUNCE_DELAY = 50; // ms
 
 void setup() {
   Serial.begin(9600);
@@ -41,6 +47,9 @@ void setup() {
   
   BLE.advertise();
   Serial.println("Sensor CADERA - Esperando conexión BLE...");
+
+  // Configurar pin del botón
+  pinMode(BUTTON_PIN, INPUT_PULLUP);
 }
 
 void loop() {
@@ -73,6 +82,24 @@ void loop() {
 
       // Frecuencia: 20Hz (50ms)
       delay(50);
+
+      // Leer estado del botón (debounce)
+      int reading = digitalRead(BUTTON_PIN);
+
+      if (reading != lastButtonState) {
+        lastDebounceTime = millis();
+      }
+
+      if ((millis() - lastDebounceTime) > DEBOUNCE_DELAY) {
+        // Si el estado cambió y es presionado (LOW)
+        if (reading == LOW && lastButtonState == HIGH) {
+          // Enviar mensaje de alerta manual
+          snprintf(jsonBuffer, sizeof(jsonBuffer), "{\"sensor\":\"cadera\", \"manual_alert\": true}");
+          sensorCharacteristic.writeValue(jsonBuffer);
+          Serial.println("Alerta manual enviada");
+        }
+        lastButtonState = reading;
+      }
     }
 
     Serial.print("CADERA desconectado de: ");
