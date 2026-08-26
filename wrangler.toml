@@ -1,5 +1,5 @@
 name = "pagina-app-emergencia"
+compatibility_date = "2026-08-25"
 
 [assets]
 directory = "./Codigos_raspberry/Pagina App de emergencia"
-compatibility_date = "2026-08-25"
