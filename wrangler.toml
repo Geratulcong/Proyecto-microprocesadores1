@@ -1,0 +1,4 @@
+name = "pagina-app-emergencia"
+
+[assets]
+directory = "./Codigos_raspberry/Pagina App de emergencia"
