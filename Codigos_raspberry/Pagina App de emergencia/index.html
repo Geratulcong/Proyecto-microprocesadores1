@@ -616,6 +616,8 @@
 let dispositivoBLE = null;
 let caracteristicaWifi = null;
 let API_BASE_URL = '';
+let guardandoContactos = false;
+let guardandoUsuario = false;
 
 // Determinar la URL base de la API
 function initializeAPI() {
@@ -629,8 +631,8 @@ function initializeAPI() {
   if (hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '0.0.0.0') {
     API_BASE_URL = `${protocol}//${hostname}:5000`;
   } else {
-    // En producción, la API está en el mismo servidor en puerto 5000
-    API_BASE_URL = `${protocol}//${hostname}:5000`;
+    // En producción (Cloudflare), no usar :5000
+    API_BASE_URL = `${protocol}//${hostname}`;
   }
   
   console.log('API Base URL:', API_BASE_URL);
@@ -763,7 +765,11 @@ function agregarContacto(){
   actualizarResumenInicio();
 }
 
-function guardarContactos(){
+async function guardarContactos(){
+  if (guardandoContactos) {
+    return;
+  }
+
   const contactos = [];
   const regexTexto = /^[A-Za-zÁÉÍÓÚáéíóúÑñ\s]+$/;
   const regexTelefono = /^\+569\d{8}$/;
@@ -803,10 +809,11 @@ function guardarContactos(){
   localStorage.setItem('contactos', JSON.stringify(contactos));
 
   // Guardar en BD
-  guardarContactosEnBD(contactos);
+  await guardarContactosEnBD(contactos);
 }
 
 async function guardarContactosEnBD(contactos){
+  guardandoContactos = true;
   try {
     const usuario_id = localStorage.getItem('usuario_id');
     
@@ -881,6 +888,8 @@ async function guardarContactosEnBD(contactos){
   } catch(error) {
     console.error('Error al guardar contactos en BD:', error);
     alert('⚠️ Contactos guardados localmente, pero hubo un error en BD: ' + error.message);
+  } finally {
+    guardandoContactos = false;
   }
 }
 
@@ -945,6 +954,11 @@ window.cargarContactosDelBD = async function(){
 };
 
 async function guardarUsuario(){
+  if (guardandoUsuario) {
+    return;
+  }
+
+  guardandoUsuario = true;
   try {
     const nombre = document.getElementById('usuarioNombre').value.trim();
     const numero = document.getElementById('usuarioNumero').value.trim();
@@ -1015,6 +1029,8 @@ async function guardarUsuario(){
   } catch(error) {
     console.error('Error al guardar usuario:', error);
     alert('❌ Error: ' + error.message);
+  } finally {
+    guardandoUsuario = false;
   }
 }
 
@@ -1275,7 +1291,7 @@ window.addEventListener('load', function(){
 <!-- Firebase -->
 <script type="module">
 import { initializeApp } from "https://www.gstatic.com/firebasejs/12.0.0/firebase-app.js";
-import { getAuth, GoogleAuthProvider, signInWithRedirect, signOut, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/12.0.0/firebase-auth.js";
+import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/12.0.0/firebase-auth.js";
 
 const firebaseConfig = {
   apiKey: "AIzaSyAdBLjNPbrX8M0QfpuQpEtuV90_5NifkzA",
@@ -1294,7 +1310,7 @@ const provider = new GoogleAuthProvider();
 
 document.getElementById("btnGoogle").addEventListener("click", async () => {
   try {
-    await signInWithRedirect(auth, provider);
+    await signInWithPopup(auth, provider);
   } catch (error) {
     console.error(error);
     alert("Error al iniciar sesión");
@@ -1328,7 +1344,13 @@ onAuthStateChanged(auth, async (user) => {
         await window.cargarContactosDelBD();
         console.log('Usuario en BD:', datos.estado, datos.usuario_id);
       } else {
-        console.error('Error al registrar usuario en BD');
+        const err = await response.json().catch(() => ({}));
+        console.error('Error al registrar usuario en BD:', err);
+        alert(err.error || 'No se pudo registrar/verificar usuario. Intenta de nuevo.');
+        await signOut(auth);
+        loginScreen.style.display = "flex";
+        appPrincipal.style.display = "none";
+        return;
       }
     } catch (error) {
       console.error('Error conectando con el servidor:', error);

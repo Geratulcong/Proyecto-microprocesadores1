@@ -3,6 +3,7 @@ from flask_cors import CORS
 from uuid import uuid4
 import os
 from database.usuario.usuario_db import UsuarioDB
+from werkzeug.security import generate_password_hash, check_password_hash
 from database.usuario.contacto_db import ContactoDB
 from database.dispositivos.raspberry_db import RaspberryDB
 
@@ -35,42 +36,26 @@ def obtener_contexto_ssl():
     return None
 
 
-@app.route('/api/usuarios/verificar-o-crear', methods=['POST'])
-def verificar_o_crear_usuario():
-    """
-    Verifica si un usuario existe por correo.
-    Si no existe, lo crea con los datos de Google.
-    Retorna el usuario_id.
-    """
+@app.route('/api/auth/register', methods=['POST'])
+def register_user():
+    """Registro de usuario con email y contraseña (hash)."""
     try:
         datos = request.json
-        
-        if not datos or 'email' not in datos:
-            return jsonify({'error': 'Email es requerido'}), 400
-        
+        if not datos or 'email' not in datos or 'password' not in datos:
+            return jsonify({'error': 'email y password son requeridos'}), 400
+
         email = datos.get('email')
         nombre = datos.get('nombre', 'Usuario')
-        
-        # Obtener todos los usuarios
-        usuarios = usuario_db.obtener_usuarios()
-        
-        # Buscar si el email ya existe
-        usuario_existente = None
-        for usuario in usuarios:
-            if usuario[2] == email:  # usuario_email está en posición 2
-                usuario_existente = usuario
-                break
-        
+        password = datos.get('password')
+
+        # Verificar si ya existe
+        usuario_existente = usuario_db.obtener_usuario_por_email(email)
         if usuario_existente:
-            # El usuario ya existe
-            return jsonify({
-                'usuario_id': str(usuario_existente[0]),
-                'estado': 'existente',
-                'mensaje': 'Usuario ya existe'
-            }), 200
-        
-        # Crear nuevo usuario
+            return jsonify({'error': 'Usuario ya existe'}), 409
+
         usuario_id = str(uuid4())
+        hashed = generate_password_hash(password)
+
         usuario_db.registrar_usuario(
             usuario_id=usuario_id,
             usuario_nombre=nombre,
@@ -78,19 +63,44 @@ def verificar_o_crear_usuario():
             usuario_telefono='',
             usuario_activo=True,
             usuario_familiar_nombre='',
-            usuario_familiar_telefono=''
+            usuario_familiar_telefono='',
+            usuario_password=hashed
         )
-        
-        return jsonify({
-            'usuario_id': usuario_id,
-            'estado': 'creado',
-            'mensaje': 'Usuario creado exitosamente'
-        }), 201
-        
+
+        return jsonify({'usuario_id': usuario_id, 'mensaje': 'Usuario creado exitosamente'}), 201
+
     except Exception as e:
-        return jsonify({
-            'error': str(e)
-        }), 500
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/auth/login', methods=['POST'])
+def login_user():
+    """Inicio de sesión con email y password (verifica hash)."""
+    try:
+        datos = request.json
+        if not datos or 'email' not in datos or 'password' not in datos:
+            return jsonify({'error': 'email y password son requeridos'}), 400
+
+        email = datos.get('email')
+        password = datos.get('password')
+
+        usuario = usuario_db.obtener_usuario_por_email(email)
+        if not usuario:
+            return jsonify({'error': 'Credenciales inválidas'}), 401
+
+        # usuario tuple: id, nombre, email, telefono, activo, fam_nombre, fam_tel, password
+        stored_hash = usuario[7]
+        if not stored_hash:
+            return jsonify({'error': 'Usuario no tiene contraseña establecida'}), 401
+
+        if not check_password_hash(stored_hash, password):
+            return jsonify({'error': 'Credenciales inválidas'}), 401
+
+        usuario_id = str(usuario[0])
+        return jsonify({'usuario_id': usuario_id, 'mensaje': 'Login exitoso'}), 200
+
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 
 
 @app.route('/api/usuarios/<usuario_id>', methods=['GET'])

@@ -1,7 +1,8 @@
 CREATE TABLE Usuario (
     usuario_id CHAR(36) PRIMARY KEY,
     usuario_nombre VARCHAR(80) NOT NULL,
-    usuario_email VARCHAR(120) NOT NULL,
+    usuario_email VARCHAR(120) NOT NULL UNIQUE,
+    usuario_password VARCHAR(255),
     usuario_telefono VARCHAR(20),
     usuario_activo BOOLEAN,
     usuario_familiar_nombre VARCHAR(80) NOT NULL,

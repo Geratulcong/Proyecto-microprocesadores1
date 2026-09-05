@@ -1,13 +1,13 @@
 name = "proyecto-guardian-caidas"
 compatibility_date = "2026-08-25"
 
-[#assets]
-#directory = "./Codigos_raspberry/Pagina App de emergencia"
+main = "src/index.js"
+
+[assets]
+directory = "./Codigos_raspberry/Pagina App de emergencia"
 
 [[d1_databases]]
 binding = "DB"
 database_name = "detector_caidas"
 database_id = "fadc5324-1354-47ff-bd18-b9bcb36c62da"
-
-main = "src/index.js"
 

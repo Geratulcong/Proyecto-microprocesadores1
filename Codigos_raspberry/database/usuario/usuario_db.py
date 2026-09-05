@@ -18,6 +18,7 @@ class UsuarioDB:
                 usuario_activo,
                 usuario_familiar_nombre,
                 usuario_familiar_telefono
+                ,usuario_password
             FROM Usuario
         """)
 
@@ -35,7 +36,8 @@ class UsuarioDB:
         usuario_telefono,
         usuario_activo,
         usuario_familiar_nombre,
-        usuario_familiar_telefono
+        usuario_familiar_telefono,
+        usuario_password=None
     ):
 
         conn = get_connection()
@@ -50,9 +52,10 @@ class UsuarioDB:
             usuario_telefono,
             usuario_activo,
             usuario_familiar_nombre,
-            usuario_familiar_telefono
+            usuario_familiar_telefono,
+            usuario_password
         )
-        VALUES (%s, %s, %s, %s, %s, %s, %s)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
         """
 
         valores = (
@@ -62,7 +65,8 @@ class UsuarioDB:
             usuario_telefono,
             usuario_activo,
             usuario_familiar_nombre,
-            usuario_familiar_telefono
+            usuario_familiar_telefono,
+            usuario_password
         )
 
         cursor.execute(sql, valores)
@@ -70,6 +74,28 @@ class UsuarioDB:
         conn.commit()
 
         conn.close()
+
+    def obtener_usuario_por_email(self, email):
+        conn = get_connection()
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT
+                usuario_id,
+                usuario_nombre,
+                usuario_email,
+                usuario_telefono,
+                usuario_activo,
+                usuario_familiar_nombre,
+                usuario_familiar_telefono,
+                usuario_password
+            FROM Usuario
+            WHERE usuario_email = %s
+            LIMIT 1
+        """, (email,))
+
+        usuario = cursor.fetchone()
+        conn.close()
+        return usuario
 
     def actualizar_telefono(
         self,
